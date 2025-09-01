@@ -16,20 +16,30 @@ class Firm extends Model
         'contact_email',
         'contact_phone',
         'address',
+        'website',
+        'tax_id',
+        'registration_number',
+        'established_date',
         'status',
         'notes',
         'rating',
+        'capabilities',
+        'certifications',
         'ai_metadata',
     ];
 
     protected $casts = [
         'ai_metadata' => 'array',
+        'capabilities' => 'array',
+        'certifications' => 'array',
         'rating' => 'decimal:1',
+        'established_date' => 'date',
     ];
 
     public function users()
     {
-        return $this->hasMany(User::class);
+        return $this->belongsToMany(User::class, 'firm_user')
+            ->withTimestamps();
     }
 
     public function primaryContact()

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Firm;
+use App\Models\User;
+use App\Models\Project;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -25,7 +27,13 @@ class FirmController extends Controller
      */
     public function create()
     {
-        return Inertia::render('firms/create');
+        $users = User::orderBy('name')->get();
+        $projects = Project::orderBy('title')->get();
+        
+        return Inertia::render('firms/form', [
+            'users' => $users,
+            'projects' => $projects
+        ]);
     }
 
     /**
@@ -40,14 +48,39 @@ class FirmController extends Controller
             'contact_email' => 'nullable|email',
             'contact_phone' => 'nullable|string',
             'address' => 'nullable|string',
+            'website' => 'nullable|url',
+            'tax_id' => 'nullable|string',
+            'registration_number' => 'nullable|string',
+            'established_date' => 'nullable|date',
             'status' => 'required|in:Active,Inactive',
             'notes' => 'nullable|string',
-            'rating' => 'nullable|numeric|min:0|max:10',
+            'rating' => 'nullable|numeric|min:0|max:5',
+            'capabilities' => 'nullable|json',
+            'certifications' => 'nullable|json',
+            'users' => 'nullable|array',
+            'users.*' => 'exists:users,id',
         ]);
+
+        // Parse JSON fields
+        if (isset($validated['capabilities']) && is_string($validated['capabilities'])) {
+            $validated['capabilities'] = json_decode($validated['capabilities'], true);
+        }
+        if (isset($validated['certifications']) && is_string($validated['certifications'])) {
+            $validated['certifications'] = json_decode($validated['certifications'], true);
+        }
+
+        // Extract users for many-to-many relationship
+        $users = $validated['users'] ?? [];
+        unset($validated['users']);
 
         $firm = Firm::create($validated);
 
-        return redirect()->route('firms.show', $firm);
+        // Attach users if provided
+        if (!empty($users)) {
+            $firm->users()->attach($users);
+        }
+
+        return redirect()->route('firms.edit', $firm)->with('success', 'Firm created successfully');
     }
 
     /**
@@ -55,10 +88,14 @@ class FirmController extends Controller
      */
     public function show(Firm $firm)
     {
-        $firm->load('primaryContact', 'users', 'projects', 'documents');
+        $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
+        $users = User::orderBy('name')->get();
+        $projects = Project::orderBy('title')->get();
         
-        return Inertia::render('firms/show', [
-            'firm' => $firm
+        return Inertia::render('firms/form', [
+            'firm' => $firm,
+            'users' => $users,
+            'projects' => $projects
         ]);
     }
 
@@ -67,8 +104,14 @@ class FirmController extends Controller
      */
     public function edit(Firm $firm)
     {
-        return Inertia::render('firms/edit', [
-            'firm' => $firm
+        $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
+        $users = User::orderBy('name')->get();
+        $projects = Project::orderBy('title')->get();
+        
+        return Inertia::render('firms/form', [
+            'firm' => $firm,
+            'users' => $users,
+            'projects' => $projects
         ]);
     }
 
@@ -84,14 +127,39 @@ class FirmController extends Controller
             'contact_email' => 'nullable|email',
             'contact_phone' => 'nullable|string',
             'address' => 'nullable|string',
+            'website' => 'nullable|url',
+            'tax_id' => 'nullable|string',
+            'registration_number' => 'nullable|string',
+            'established_date' => 'nullable|date',
             'status' => 'sometimes|required|in:Active,Inactive',
             'notes' => 'nullable|string',
-            'rating' => 'nullable|numeric|min:0|max:10',
+            'rating' => 'nullable|numeric|min:0|max:5',
+            'capabilities' => 'nullable|json',
+            'certifications' => 'nullable|json',
+            'users' => 'nullable|array',
+            'users.*' => 'exists:users,id',
         ]);
+
+        // Parse JSON fields
+        if (isset($validated['capabilities']) && is_string($validated['capabilities'])) {
+            $validated['capabilities'] = json_decode($validated['capabilities'], true);
+        }
+        if (isset($validated['certifications']) && is_string($validated['certifications'])) {
+            $validated['certifications'] = json_decode($validated['certifications'], true);
+        }
+
+        // Extract users for many-to-many relationship
+        $users = $validated['users'] ?? [];
+        unset($validated['users']);
 
         $firm->update($validated);
 
-        return redirect()->route('firms.show', $firm);
+        // Sync users if provided
+        if (isset($request->users)) {
+            $firm->users()->sync($users);
+        }
+
+        return redirect()->route('firms.edit', $firm)->with('success', 'Firm updated successfully');
     }
 
     /**

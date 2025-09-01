@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
-import axios from 'axios';
+import axios from '@/lib/axios';
 import AppLayout from '@/layouts/app-layout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,12 +15,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import TaskKanban from '@/components/TaskKanban';
 import Timeline from '@/components/Timeline';
+import DocumentSelectionModal from '@/components/DocumentSelectionModal';
 import {
     FileText, Users, CheckSquare, FolderOpen, Building2, Calendar,
     Plus, Edit2, Save, X, ChevronRight, Clock, AlertCircle,
     DollarSign, Briefcase, Target, TrendingUp, Trash2, Eye,
     Download, Upload, Filter, Search, MoreVertical, Link2,
-    Kanban, List, CalendarDays, ChevronDown
+    Kanban, List, CalendarDays, ChevronDown, Sparkles
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -36,10 +37,13 @@ interface Project {
     sector: string | null;
     scope_of_work: string[] | null;
     client: string | null;
-    stage: 'Identification' | 'Pre-Bid' | 'Proposal' | 'Award' | 'Implementation';
+    client_email: string | null;
+    client_phone: string | null;
+    documents_procurement: string | null;
+    stage: string | null;
     submission_date: string | null;
     bid_security: string | null;
-    status: 'Active' | 'Closed' | 'On Hold';
+    status: string | null;
     pre_bid_expected_date: string | null;
     advertisement: string | null;
     created_at?: string;
@@ -63,7 +67,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     const [activeTab, setActiveTab] = useState(() => {
         // Check URL hash first
         const hash = window.location.hash.replace('#', '');
-        if (['overview', 'requirements', 'tasks', 'documents', 'firms', 'milestones'].includes(hash)) {
+        if (['overview', 'documents', 'requirements', 'tasks', 'firms', 'milestones'].includes(hash)) {
             return hash;
         }
         // Otherwise check localStorage
@@ -83,6 +87,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     const advertisementInputRef = useRef<HTMLInputElement>(null);
     const [advertisementFile, setAdvertisementFile] = useState<File | null>(null);
     const [advertisementPreview, setAdvertisementPreview] = useState<string | null>(null);
+    const [removeAdvertisementFlag, setRemoveAdvertisementFlag] = useState(false);
     const [newScope, setNewScope] = useState('');
     const [showAddRequirement, setShowAddRequirement] = useState(false);
     const [newRequirement, setNewRequirement] = useState({
@@ -93,6 +98,9 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         description: ''
     });
     const [requirements, setRequirements] = useState(Array.isArray(project?.requirements) ? project.requirements : []);
+    const [generatingOverview, setGeneratingOverview] = useState(false);
+    const [showDocumentSelectionModal, setShowDocumentSelectionModal] = useState(false);
+    const [generatingRequirements, setGeneratingRequirements] = useState(false);
 
     // Fetch documents when project changes or tab is selected
     useEffect(() => {
@@ -122,10 +130,13 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         sector: project?.sector || '',
         scope_of_work: Array.isArray(project?.scope_of_work) ? project.scope_of_work : [],
         client: project?.client || '',
-        stage: project?.stage || 'Identification',
+        client_email: project?.client_email || '',
+        client_phone: project?.client_phone || '',
+        documents_procurement: project?.documents_procurement || '',
+        stage: project?.stage || '',
         submission_date: formatDateForInput(project?.submission_date),
         bid_security: project?.bid_security || '',
-        status: project?.status || 'Active',
+        status: project?.status || '',
         pre_bid_expected_date: formatDateForInput(project?.pre_bid_expected_date),
         firms: Array.isArray(project?.firms) ? project.firms : [],
         requirements: Array.isArray(project?.requirements) ? project.requirements : [],
@@ -214,6 +225,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         }
 
         setAdvertisementFile(file);
+        setRemoveAdvertisementFlag(false); // Reset remove flag when new file selected
         
         // Create preview
         const reader = new FileReader();
@@ -229,47 +241,78 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         if (advertisementInputRef.current) {
             advertisementInputRef.current.value = '';
         }
-        // Mark for removal if editing existing project
-        if (project?.id) {
-            setData('remove_advertisement', true);
+        // Mark for removal if editing existing project with an advertisement
+        if (project?.advertisement) {
+            setRemoveAdvertisementFlag(true);
         }
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         
-        const formData = new FormData();
-        
-        // Add all regular data fields
-        Object.keys(data).forEach(key => {
-            if (key === 'scope_of_work' || key === 'firms' || key === 'requirements') {
-                formData.append(key, JSON.stringify(data[key]));
-            } else if (data[key] !== null && data[key] !== undefined) {
-                formData.append(key, data[key]);
-            }
-        });
+        // Prepare the data object with the file
+        const submitData: any = {
+            ...data,
+            scope_of_work: JSON.stringify(data.scope_of_work),
+            firms: JSON.stringify(data.firms),
+            requirements: JSON.stringify(data.requirements),
+        };
         
         // Add advertisement file if present
         if (advertisementFile) {
-            formData.append('advertisement', advertisementFile);
+            submitData.advertisement = advertisementFile;
+        }
+        
+        // Add remove flag if needed
+        if (removeAdvertisementFlag) {
+            submitData.remove_advertisement = true;
         }
         
         if (!project?.id) {
-            router.post('/projects', formData, {
+            router.post('/projects', submitData, {
                 preserveScroll: true,
                 forceFormData: true,
                 onSuccess: () => {
-                    // Stay on form or redirect to edit page
+                    // Show success notification
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center gap-2';
+                    notification.innerHTML = '<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>Project created successfully!</span>';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 3000);
+                },
+                onError: () => {
+                    // Show error notification
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
+                    notification.textContent = 'Failed to create project. Please check the form.';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 4000);
                 }
             });
         } else {
-            formData.append('_method', 'PUT');
-            router.post(`/projects/${project.id}`, formData, {
+            router.post(`/projects/${project.id}`, {
+                ...submitData,
+                _method: 'PUT'
+            }, {
                 preserveScroll: true,
                 preserveState: false,
                 forceFormData: true,
                 onSuccess: () => {
-                    // Stay on the same page after saving
+                    setRemoveAdvertisementFlag(false); // Reset flag after successful save
+                    // Show success notification
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center gap-2';
+                    notification.innerHTML = '<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>Project saved successfully!</span>';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 3000);
+                },
+                onError: () => {
+                    // Show error notification
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
+                    notification.textContent = 'Failed to save project. Please check the form.';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 4000);
                 }
             });
         }
@@ -409,6 +452,91 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         }
     };
 
+    const handleGenerateOverview = async () => {
+        // Check if we have an advertisement image
+        if (!advertisementPreview && !advertisementFile) {
+            alert('Please upload an advertisement image first');
+            return;
+        }
+
+        setGeneratingOverview(true);
+        try {
+            const imageData = advertisementPreview || '';
+            
+            // Call the API
+            const response = await axios.post('/projects/generate-overview', {
+                image: imageData,
+            });
+
+            if (response.data.success) {
+                const generatedData = response.data.data;
+                
+                // Update form fields with generated data
+                if (generatedData.title) setData('title', generatedData.title);
+                if (generatedData.client) setData('client', generatedData.client);
+                if (generatedData.client_email) setData('client_email', generatedData.client_email);
+                if (generatedData.client_phone) setData('client_phone', generatedData.client_phone);
+                if (generatedData.documents_procurement) setData('documents_procurement', generatedData.documents_procurement);
+                if (generatedData.sector) setData('sector', generatedData.sector);
+                if (generatedData.bid_security) setData('bid_security', generatedData.bid_security);
+                if (generatedData.scope_of_work && Array.isArray(generatedData.scope_of_work)) {
+                    setData('scope_of_work', generatedData.scope_of_work);
+                }
+                if (generatedData.submission_date) setData('submission_date', generatedData.submission_date);
+                if (generatedData.pre_bid_expected_date) setData('pre_bid_expected_date', generatedData.pre_bid_expected_date);
+                if (generatedData.status) setData('status', generatedData.status);
+                if (generatedData.stage) setData('stage', generatedData.stage);
+                
+                // Show success message
+                alert('Overview generated successfully! Please review and adjust the extracted information as needed.');
+            } else {
+                alert('Failed to generate overview: ' + (response.data.error || 'Unknown error'));
+            }
+        } catch (error: any) {
+            console.error('Error generating overview:', error);
+            alert('Error generating overview: ' + (error.response?.data?.error || error.message || 'Unknown error'));
+        } finally {
+            setGeneratingOverview(false);
+        }
+    };
+
+    const handleGenerateRequirements = async (selectedDocumentIds: number[]) => {
+        if (!project?.id) {
+            alert('Please save the project first before generating requirements');
+            setShowDocumentSelectionModal(false);
+            return;
+        }
+
+        setGeneratingRequirements(true);
+        try {
+            const response = await axios.post('/projects/generate-requirements', {
+                document_ids: selectedDocumentIds,
+                project_id: project.id
+            });
+
+            if (response.data.success) {
+                const generatedRequirements = response.data.data;
+                
+                // Merge new requirements with existing ones
+                const updatedRequirements = [...requirements, ...generatedRequirements];
+                setRequirements(updatedRequirements);
+                setData('requirements', updatedRequirements);
+                
+                // Show success message
+                alert(`${generatedRequirements.length} requirements generated successfully! Please review them in the requirements list.`);
+                
+                // Close the modal
+                setShowDocumentSelectionModal(false);
+            } else {
+                alert('Failed to generate requirements: ' + (response.data.error || 'Unknown error'));
+            }
+        } catch (error: any) {
+            console.error('Error generating requirements:', error);
+            alert('Error generating requirements: ' + (error.response?.data?.error || error.message || 'Unknown error'));
+        } finally {
+            setGeneratingRequirements(false);
+        }
+    };
 
     const stageColors = {
         'Identification': 'bg-gray-100 text-gray-700',
@@ -463,10 +591,22 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                             form="project-form"
                             size="sm"
                             disabled={processing}
-                            className="h-6 text-xs px-2"
+                            className={cn(
+                                "h-6 text-xs px-2 transition-all",
+                                processing && "opacity-75"
+                            )}
                         >
-                            <Save className="h-3 w-3 mr-1" />
-                            Save
+                            {processing ? (
+                                <>
+                                    <div className="h-3 w-3 mr-1 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                    Saving...
+                                </>
+                            ) : (
+                                <>
+                                    <Save className="h-3 w-3 mr-1" />
+                                    Save
+                                </>
+                            )}
                         </Button>
                     </div>
                 </div>
@@ -485,9 +625,9 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                 }} className="w-full">
                     <TabsList className="grid w-full grid-cols-6">
                         <TabsTrigger value="overview">Overview</TabsTrigger>
+                        <TabsTrigger value="documents">Documents</TabsTrigger>
                         <TabsTrigger value="requirements">Requirements</TabsTrigger>
                         <TabsTrigger value="tasks">Tasks</TabsTrigger>
-                        <TabsTrigger value="documents">Documents</TabsTrigger>
                         <TabsTrigger value="firms">Firms</TabsTrigger>
                         <TabsTrigger value="milestones">Timeline</TabsTrigger>
                     </TabsList>
@@ -496,7 +636,26 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                         <div className="grid grid-cols-3 gap-4">
                             <Card className="col-span-2">
                                 <CardHeader className="px-2 py-1">
-                                    <CardTitle className="text-sm">General Information</CardTitle>
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm">General Information</CardTitle>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="default"
+                                            className="h-6 px-2 bg-black hover:bg-gray-800 text-white"
+                                            onClick={handleGenerateOverview}
+                                            disabled={generatingOverview}
+                                        >
+                                            {generatingOverview ? (
+                                                <>
+                                                    <div className="h-3 w-3 mr-1 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                                    Generating...
+                                                </>
+                                            ) : (
+                                                'Generate Overview'
+                                            )}
+                                        </Button>
+                                    </div>
                                 </CardHeader>
                                 <CardContent className="px-2 py-1 space-y-0.5">
                                     <div className="grid grid-cols-2 gap-3">
@@ -513,7 +672,29 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             <Input
                                                 value={data.client || ''}
                                                 onChange={e => setData('client', e.target.value)}
-                                                                                                className="h-7 text-sm"
+                                                className="h-7 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <Label className="text-xs">Client Email</Label>
+                                            <Input
+                                                type="email"
+                                                value={data.client_email || ''}
+                                                onChange={e => setData('client_email', e.target.value)}
+                                                className="h-7 text-sm"
+                                                placeholder="client@example.com"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs">Client Phone</Label>
+                                            <Input
+                                                type="tel"
+                                                value={data.client_phone || ''}
+                                                onChange={e => setData('client_phone', e.target.value)}
+                                                className="h-7 text-sm"
+                                                placeholder="+1 234 567 8900"
                                             />
                                         </div>
                                     </div>
@@ -523,7 +704,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             <Input
                                                 value={data.sector || ''}
                                                 onChange={e => setData('sector', e.target.value)}
-                                                                                                className="h-7 text-sm"
+                                                className="h-7 text-sm"
                                             />
                                         </div>
                                         <div>
@@ -531,7 +712,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             <Input
                                                 value={data.bid_security || ''}
                                                 onChange={e => setData('bid_security', e.target.value)}
-                                                                                                className="h-7 text-sm"
+                                                className="h-7 text-sm"
                                             />
                                         </div>
                                     </div>
@@ -570,15 +751,29 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                         </div>
                                     </div>
                                     <div>
+                                        <Label className="text-xs">Documents Procurement</Label>
+                                        <div 
+                                            className="mt-1 p-2 bg-gray-50 rounded-md text-sm prose prose-sm max-w-none min-h-[40px]"
+                                            dangerouslySetInnerHTML={{ __html: data.documents_procurement || '<span class="text-gray-400">No procurement information available</span>' }}
+                                        />
+                                    </div>
+                                    <div>
                                         <Label className="text-xs">Advertisement</Label>
                                         <div className="mt-0.5">
                                             {advertisementPreview ? (
                                                 <div className="relative">
-                                                    <img 
-                                                        src={advertisementPreview} 
-                                                        alt="Advertisement" 
-                                                        className="w-full h-32 object-cover rounded border"
-                                                    />
+                                                    <a 
+                                                        href={advertisementPreview} 
+                                                        target="_blank" 
+                                                        rel="noopener noreferrer"
+                                                        className="block cursor-pointer hover:opacity-90 transition-opacity"
+                                                    >
+                                                        <img 
+                                                            src={advertisementPreview} 
+                                                            alt="Advertisement" 
+                                                            className="w-full h-32 object-cover rounded border"
+                                                        />
+                                                    </a>
                                                     <Button
                                                         type="button"
                                                         size="sm"
@@ -624,37 +819,21 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                 <CardContent className="px-2 py-1 space-y-0.5">
                                     <div>
                                         <Label className="text-xs">Stage</Label>
-                                        <Select
-                                            value={data.stage}
-                                            onValueChange={(value: any) => setData('stage', value)}
-                                                                                    >
-                                            <SelectTrigger className="h-7 text-sm">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="Identification">Identification</SelectItem>
-                                                <SelectItem value="Pre-Bid">Pre-Bid</SelectItem>
-                                                <SelectItem value="Proposal">Proposal</SelectItem>
-                                                <SelectItem value="Award">Award</SelectItem>
-                                                <SelectItem value="Implementation">Implementation</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        <Input
+                                            value={data.stage || ''}
+                                            onChange={e => setData('stage', e.target.value)}
+                                            className="h-7 text-sm"
+                                            placeholder="e.g., Identification, Pre-Bid, Proposal"
+                                        />
                                     </div>
                                     <div>
                                         <Label className="text-xs">Status</Label>
-                                        <Select
-                                            value={data.status}
-                                            onValueChange={(value: any) => setData('status', value)}
-                                                                                    >
-                                            <SelectTrigger className="h-7 text-sm">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="Active">Active</SelectItem>
-                                                <SelectItem value="On Hold">On Hold</SelectItem>
-                                                <SelectItem value="Closed">Closed</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        <Input
+                                            value={data.status || ''}
+                                            onChange={e => setData('status', e.target.value)}
+                                            className="h-7 text-sm"
+                                            placeholder="e.g., Active, On Hold, Closed"
+                                        />
                                     </div>
                                     <div>
                                         <Label className="text-xs">Submission Date</Label>
@@ -816,6 +995,28 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             <Filter className="h-3 w-3 mr-1" />
                                             Filter
                                         </Button>
+                                        {project?.id && (
+                                            <Button 
+                                                type="button" 
+                                                size="sm" 
+                                                variant="ghost" 
+                                                className="h-6 px-2 bg-gray-100 hover:bg-gray-200 border-0"
+                                                onClick={() => setShowDocumentSelectionModal(true)}
+                                                disabled={generatingRequirements}
+                                            >
+                                                {generatingRequirements ? (
+                                                    <>
+                                                        <div className="h-3 w-3 mr-1 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
+                                                        Generating...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Sparkles className="h-3 w-3 mr-1" />
+                                                        Generate Requirements
+                                                    </>
+                                                )}
+                                            </Button>
+                                        )}
                                         <Button 
                                             type="button" 
                                             size="sm" 
@@ -1300,9 +1501,12 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             </form>
             
             <Dialog open={showAddRequirement} onOpenChange={setShowAddRequirement}>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="sm:max-w-[425px]" aria-describedby="add-requirement-description">
                     <DialogHeader>
                         <DialogTitle>Add New Requirement</DialogTitle>
+                        <p id="add-requirement-description" className="text-sm text-gray-500 mt-1 sr-only">
+                            Add a new requirement to the project with type, priority, and description.
+                        </p>
                     </DialogHeader>
                     <div className="grid gap-1 py-1">
                         <div className="grid gap-1">
@@ -1363,9 +1567,12 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             </Dialog>
             
             <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="sm:max-w-[425px]" aria-describedby="upload-document-description">
                     <DialogHeader>
                         <DialogTitle>Upload Document</DialogTitle>
+                        <p id="upload-document-description" className="text-sm text-gray-500 mt-1 sr-only">
+                            Upload a document and optionally assign it to a requirement.
+                        </p>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <div>
@@ -1441,6 +1648,14 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            
+            <DocumentSelectionModal
+                open={showDocumentSelectionModal}
+                onOpenChange={setShowDocumentSelectionModal}
+                projectId={project?.id || 0}
+                onGenerate={handleGenerateRequirements}
+                loading={generatingRequirements}
+            />
         </AppLayout>
     );
 }

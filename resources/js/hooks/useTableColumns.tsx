@@ -172,7 +172,7 @@ export const projectColumns: ColumnConfig<any>[] = [
 ];
 
 export const firmColumns: ColumnConfig<any>[] = [
-    { accessorKey: 'name', header: 'Name', sortable: true, filterable: true },
+    { accessorKey: 'name', header: 'Name', sortable: true, filterable: true, type: 'link', linkPrefix: '/firms' },
     { accessorKey: 'type', header: 'Type', type: 'badge', sortable: true, filterable: true, groupable: true },
     { accessorKey: 'contact_email', header: 'Email', type: 'email', sortable: true, filterable: true },
     { accessorKey: 'contact_phone', header: 'Phone', type: 'phone' },

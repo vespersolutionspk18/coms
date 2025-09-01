@@ -10,6 +10,8 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\CommentController;
 use App\Http\Controllers\MilestoneController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OverviewGenerationController;
+use App\Http\Controllers\RequirementsGenerationController;
 
 Route::get('/', function () {
     return Inertia::render('welcome');
@@ -34,6 +36,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('milestones/{milestone}/status', [MilestoneController::class, 'updateStatus'])->name('milestones.updateStatus');
     Route::post('milestones/update-order', [MilestoneController::class, 'updateOrder'])->name('milestones.updateOrder');
     Route::resource('notifications', NotificationController::class);
+    
+    // Overview generation route
+    Route::post('projects/generate-overview', [OverviewGenerationController::class, 'generateOverview'])->name('projects.generate-overview');
+    
+    // Requirements generation route
+    Route::post('projects/generate-requirements', [RequirementsGenerationController::class, 'generateRequirements'])->name('projects.generate-requirements');
 });
 
 require __DIR__.'/settings.php';
