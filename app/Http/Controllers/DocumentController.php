@@ -1,0 +1,204 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Document;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+class DocumentController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     */
+    public function index(Request $request)
+    {
+        $query = Document::with(['uploadedBy', 'project', 'firm', 'requirement', 'task']);
+
+        if ($request->has('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        if ($request->has('firm_id')) {
+            $query->where('firm_id', $request->firm_id);
+        }
+
+        if ($request->has('requirement_id')) {
+            $query->where('requirement_id', $request->requirement_id);
+        }
+
+        if ($request->has('task_id')) {
+            $query->where('task_id', $request->task_id);
+        }
+
+        if ($request->has('search')) {
+            $query->where('name', 'like', '%' . $request->search . '%');
+        }
+
+        $documents = $query->orderBy('created_at', 'desc')->paginate(20);
+
+        return response()->json($documents);
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     */
+    public function create()
+    {
+        //
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
+            'name' => 'nullable|string|max:255',
+            'project_id' => 'nullable|exists:projects,id',
+            'firm_id' => 'nullable|exists:firms,id',
+            'requirement_id' => 'nullable|exists:requirements,id',
+            'task_id' => 'nullable|exists:tasks,id',
+            'tags' => 'nullable|array',
+            'status' => 'nullable|in:Pending Review,Approved,Rejected,AI-Reviewed',
+        ]);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $fileName = $validated['name'] ?? $file->getClientOriginalName();
+            
+            // Generate unique filename
+            $uniqueFileName = Str::uuid() . '_' . $fileName;
+            
+            // Store file in storage/app/documents
+            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            
+            // Extract text from document if possible (placeholder for future implementation)
+            $parsedText = null;
+            
+            $document = Document::create([
+                'name' => $fileName,
+                'file_path' => $path,
+                'parsed_text' => $parsedText,
+                'uploaded_by' => auth()->id(),
+                'project_id' => $validated['project_id'] ?? null,
+                'firm_id' => $validated['firm_id'] ?? null,
+                'requirement_id' => $validated['requirement_id'] ?? null,
+                'task_id' => $validated['task_id'] ?? null,
+                'tags' => $validated['tags'] ?? null,
+                'status' => $validated['status'] ?? 'Pending Review',
+                'version' => 1,
+            ]);
+
+            return response()->json([
+                'message' => 'Document uploaded successfully',
+                'document' => $document->load(['uploadedBy', 'requirement'])
+            ], 201);
+        }
+
+        return response()->json(['message' => 'No file uploaded'], 400);
+    }
+
+    /**
+     * Display the specified resource.
+     */
+    public function show(Document $document)
+    {
+        $document->load(['uploadedBy', 'project', 'firm', 'requirement', 'task', 'comments.user']);
+        
+        return response()->json($document);
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
+    {
+        //
+    }
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, Document $document)
+    {
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'tags' => 'nullable|array',
+            'status' => 'sometimes|in:Pending Review,Approved,Rejected,AI-Reviewed',
+            'project_id' => 'nullable|exists:projects,id',
+            'firm_id' => 'nullable|exists:firms,id',
+            'requirement_id' => 'nullable',
+            'task_id' => 'nullable|exists:tasks,id',
+        ]);
+
+        // Validate requirement_id separately if provided and not null
+        if (isset($validated['requirement_id']) && $validated['requirement_id'] !== null) {
+            $request->validate([
+                'requirement_id' => 'exists:requirements,id'
+            ]);
+        }
+
+        // If a new file is uploaded, create a new version
+        if ($request->hasFile('file')) {
+            $request->validate([
+                'file' => 'file|mimes:pdf,doc,docx|max:10240',
+            ]);
+
+            $file = $request->file('file');
+            $fileName = $validated['name'] ?? $document->name;
+            
+            // Generate unique filename for new version
+            $uniqueFileName = Str::uuid() . '_v' . ($document->version + 1) . '_' . $fileName;
+            
+            // Store new file
+            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            
+            // Delete old file if exists
+            if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
+                Storage::disk('local')->delete($document->file_path);
+            }
+            
+            $validated['file_path'] = $path;
+            $validated['version'] = $document->version + 1;
+        }
+
+        $document->update($validated);
+
+        return response()->json([
+            'message' => 'Document updated successfully',
+            'document' => $document->fresh(['uploadedBy', 'requirement'])
+        ]);
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Document $document)
+    {
+        // Delete the physical file
+        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
+            Storage::disk('local')->delete($document->file_path);
+        }
+
+        $document->delete();
+
+        return response()->json([
+            'message' => 'Document deleted successfully'
+        ]);
+    }
+
+    /**
+     * Download a document
+     */
+    public function download(Document $document)
+    {
+        if (!$document->file_path || !Storage::disk('local')->exists($document->file_path)) {
+            return response()->json(['message' => 'File not found'], 404);
+        }
+
+        return Storage::disk('local')->download($document->file_path, $document->name);
+    }
+}
