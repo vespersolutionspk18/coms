@@ -221,3 +221,10 @@ export const documentColumns: ColumnConfig<any>[] = [
     { accessorKey: 'tags', header: 'Tags', type: 'badge' },
     { accessorKey: 'created_at', header: 'Uploaded', type: 'datetime', sortable: true },
 ];
+
+export const userColumns: ColumnConfig<any>[] = [
+    { accessorKey: 'name', header: 'Name', sortable: true, filterable: true },
+    { accessorKey: 'email', header: 'Email', type: 'email', sortable: true, filterable: true },
+    { accessorKey: 'firm.name', header: 'Firm', sortable: true, filterable: true },
+    { accessorKey: 'created_at', header: 'Created', type: 'date', sortable: true },
+];

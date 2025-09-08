@@ -95,9 +95,25 @@ class FirmController extends Controller
      */
     public function show(Firm $firm)
     {
+        $user = auth()->user();
+        
+        // Non-superadmins can only access their own firm
+        if (!$user->isSuperadmin() && $user->firm_id !== $firm->id) {
+            abort(403, 'Access denied: You can only access your own firm.');
+        }
+
         $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
-        $users = User::orderBy('name')->get();
-        $projects = Project::orderBy('title')->get();
+        
+        // Superadmins see all users, regular users only see users from their firm
+        if ($user->isSuperadmin()) {
+            $users = User::orderBy('name')->get();
+            $projects = Project::orderBy('title')->get();
+        } else {
+            $users = User::where('firm_id', $firm->id)->orderBy('name')->get();
+            $projects = Project::whereHas('firms', function($query) use ($firm) {
+                $query->where('firm_id', $firm->id);
+            })->orderBy('title')->get();
+        }
         
         return Inertia::render('firms/form', [
             'firm' => $firm,
@@ -111,9 +127,25 @@ class FirmController extends Controller
      */
     public function edit(Firm $firm)
     {
+        $user = auth()->user();
+        
+        // Non-superadmins can only access their own firm
+        if (!$user->isSuperadmin() && $user->firm_id !== $firm->id) {
+            abort(403, 'Access denied: You can only access your own firm.');
+        }
+
         $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
-        $users = User::orderBy('name')->get();
-        $projects = Project::orderBy('title')->get();
+        
+        // Superadmins see all users, regular users only see users from their firm
+        if ($user->isSuperadmin()) {
+            $users = User::orderBy('name')->get();
+            $projects = Project::orderBy('title')->get();
+        } else {
+            $users = User::where('firm_id', $firm->id)->orderBy('name')->get();
+            $projects = Project::whereHas('firms', function($query) use ($firm) {
+                $query->where('firm_id', $firm->id);
+            })->orderBy('title')->get();
+        }
         
         return Inertia::render('firms/form', [
             'firm' => $firm,
@@ -127,6 +159,12 @@ class FirmController extends Controller
      */
     public function update(Request $request, Firm $firm)
     {
+        $user = auth()->user();
+        
+        // Non-superadmins can only update their own firm
+        if (!$user->isSuperadmin() && $user->firm_id !== $firm->id) {
+            abort(403, 'Access denied: You can only update your own firm.');
+        }
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:Internal,JV Partner',

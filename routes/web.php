@@ -12,6 +12,7 @@ use App\Http\Controllers\MilestoneController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OverviewGenerationController;
 use App\Http\Controllers\RequirementsGenerationController;
+use App\Http\Controllers\UserController;
 
 Route::get('/', function () {
     return redirect()->route('login');
@@ -27,8 +28,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('dashboard');
 
     // Resource routes for project management
-    Route::resource('firms', FirmController::class);
-    Route::resource('projects', ProjectController::class);
+    Route::resource('users', UserController::class)->middleware('superadmin')->only(['index', 'create', 'store']);
+    Route::resource('users', UserController::class)->middleware('firm.access')->only(['show', 'edit', 'update', 'destroy']);
+    
+    Route::resource('firms', FirmController::class)->middleware('superadmin')->only(['index', 'create', 'store', 'destroy']);
+    Route::resource('firms', FirmController::class)->middleware('firm.access')->only(['show', 'edit', 'update']);
+    
+    Route::resource('projects', ProjectController::class)->middleware('firm.access');
     Route::resource('requirements', RequirementController::class);
     Route::delete('requirements/clear-all/{projectId}', [RequirementController::class, 'clearAll'])->name('requirements.clear-all');
     Route::resource('tasks', TaskController::class);

@@ -12,14 +12,26 @@ use Illuminate\Support\Str;
 
 class ProjectController extends Controller
 {
+
     /**
      * Display a listing of the resource.
      */
     public function index()
     {
-        $projects = Project::with('firms', 'milestones')
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
+        $user = auth()->user();
+        
+        if ($user->isSuperadmin()) {
+            $projects = Project::with('firms', 'milestones')
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
+        } else {
+            $projects = Project::with('firms', 'milestones')
+                ->whereHas('firms', function($query) use ($user) {
+                    $query->where('firm_id', $user->firm_id);
+                })
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
+        }
         
         return Inertia::render('projects/index', [
             'projects' => $projects

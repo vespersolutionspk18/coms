@@ -90,4 +90,36 @@ class User extends Authenticatable
     {
         return $this->hasMany(Notification::class);
     }
+
+    public function isSuperadmin()
+    {
+        return $this->role === 'superadmin';
+    }
+
+    public function canAccessFirm($firmId)
+    {
+        if ($this->isSuperadmin()) {
+            return true;
+        }
+        
+        return $this->firm_id == $firmId;
+    }
+
+    public function canAccessProject($project)
+    {
+        if ($this->isSuperadmin()) {
+            return true;
+        }
+        
+        return $project->firms()->where('firm_id', $this->firm_id)->exists();
+    }
+
+    public function canManageUser($user)
+    {
+        if ($this->isSuperadmin()) {
+            return true;
+        }
+        
+        return $this->firm_id == $user->firm_id;
+    }
 }
