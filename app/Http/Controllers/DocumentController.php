@@ -55,7 +55,7 @@ class DocumentController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'file' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
+            'file' => 'required|file|mimes:pdf,doc,docx', // No size limit
             'name' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'firm_id' => 'nullable|exists:firms,id',
@@ -72,8 +72,8 @@ class DocumentController extends Controller
             // Generate unique filename
             $uniqueFileName = Str::uuid() . '_' . $fileName;
             
-            // Store file in storage/app/documents
-            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            // Store file using default disk (S3)
+            $path = $file->storeAs('documents', $uniqueFileName);
             
             // Extract text from document if possible (placeholder for future implementation)
             $parsedText = null;
@@ -144,7 +144,7 @@ class DocumentController extends Controller
         // If a new file is uploaded, create a new version
         if ($request->hasFile('file')) {
             $request->validate([
-                'file' => 'file|mimes:pdf,doc,docx|max:10240',
+                'file' => 'file|mimes:pdf,doc,docx',
             ]);
 
             $file = $request->file('file');
@@ -153,12 +153,12 @@ class DocumentController extends Controller
             // Generate unique filename for new version
             $uniqueFileName = Str::uuid() . '_v' . ($document->version + 1) . '_' . $fileName;
             
-            // Store new file
-            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            // Store new file using default disk (S3)
+            $path = $file->storeAs('documents', $uniqueFileName);
             
             // Delete old file if exists
-            if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
-                Storage::disk('local')->delete($document->file_path);
+            if ($document->file_path && Storage::exists($document->file_path)) {
+                Storage::delete($document->file_path);
             }
             
             $validated['file_path'] = $path;
@@ -179,8 +179,8 @@ class DocumentController extends Controller
     public function destroy(Document $document)
     {
         // Delete the physical file
-        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
-            Storage::disk('local')->delete($document->file_path);
+        if ($document->file_path && Storage::exists($document->file_path)) {
+            Storage::delete($document->file_path);
         }
 
         $document->delete();
@@ -195,11 +195,11 @@ class DocumentController extends Controller
      */
     public function download(Document $document)
     {
-        if (!$document->file_path || !Storage::disk('local')->exists($document->file_path)) {
+        if (!$document->file_path || !Storage::exists($document->file_path)) {
             return response()->json(['message' => 'File not found'], 404);
         }
 
-        return Storage::disk('local')->download($document->file_path, $document->name);
+        return Storage::download($document->file_path, $document->name);
     }
 
     /**
@@ -221,7 +221,7 @@ class DocumentController extends Controller
     public function storeFirmDocument(Request $request, $firmId)
     {
         $validated = $request->validate([
-            'file' => 'required|file|mimes:pdf,doc,docx,txt,png,jpg,jpeg,gif,xlsx,xls,csv|max:10240',
+            'file' => 'required|file|mimes:pdf,doc,docx,txt,png,jpg,jpeg,gif,xlsx,xls,csv',
             'name' => 'required|string|max:255',
             'category' => 'nullable|string|max:255',
         ]);
@@ -233,8 +233,8 @@ class DocumentController extends Controller
             // Generate unique filename
             $uniqueFileName = Str::uuid() . '_' . preg_replace('/[^A-Za-z0-9\-\_\.]/', '_', $file->getClientOriginalName());
             
-            // Store file in storage/app/private/documents
-            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            // Store file using default disk (S3)
+            $path = $file->storeAs('documents', $uniqueFileName);
             
             $document = Document::create([
                 'name' => $fileName,
@@ -289,8 +289,8 @@ class DocumentController extends Controller
         }
 
         // Delete the physical file
-        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
-            Storage::disk('local')->delete($document->file_path);
+        if ($document->file_path && Storage::exists($document->file_path)) {
+            Storage::delete($document->file_path);
         }
 
         $document->delete();

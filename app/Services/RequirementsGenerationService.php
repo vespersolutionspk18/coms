@@ -40,10 +40,26 @@ class RequirementsGenerationService
                 
                 if ($extension === 'pdf') {
                     // Parse PDF content
-                    // Try local disk first, then public
-                    $fullPath = Storage::disk('local')->path($documentPath);
-                    if (!file_exists($fullPath)) {
-                        $fullPath = Storage::disk('public')->path($documentPath);
+                    // Try default disk first (S3), then fallback to local paths if needed
+                    try {
+                        if (Storage::exists($documentPath)) {
+                            // For S3, we need to get a temporary URL or download the file temporarily
+                            $tempFile = tempnam(sys_get_temp_dir(), 'pdf_');
+                            file_put_contents($tempFile, Storage::get($documentPath));
+                            $fullPath = $tempFile;
+                        } else {
+                            // Fallback to local disk paths
+                            $fullPath = Storage::disk('local')->path($documentPath);
+                            if (!file_exists($fullPath)) {
+                                $fullPath = Storage::disk('public')->path($documentPath);
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Fallback to local disk paths
+                        $fullPath = Storage::disk('local')->path($documentPath);
+                        if (!file_exists($fullPath)) {
+                            $fullPath = Storage::disk('public')->path($documentPath);
+                        }
                     }
                     
                     if (file_exists($fullPath)) {
@@ -53,10 +69,26 @@ class RequirementsGenerationService
                     }
                 } elseif (in_array($extension, ['docx', 'doc'])) {
                     // Handle Word documents
-                    // Try local disk first, then public
-                    $fullPath = Storage::disk('local')->path($documentPath);
-                    if (!file_exists($fullPath)) {
-                        $fullPath = Storage::disk('public')->path($documentPath);
+                    // Try default disk first (S3), then fallback to local paths if needed
+                    try {
+                        if (Storage::exists($documentPath)) {
+                            // For S3, we need to get a temporary URL or download the file temporarily
+                            $tempFile = tempnam(sys_get_temp_dir(), 'doc_');
+                            file_put_contents($tempFile, Storage::get($documentPath));
+                            $fullPath = $tempFile;
+                        } else {
+                            // Fallback to local disk paths
+                            $fullPath = Storage::disk('local')->path($documentPath);
+                            if (!file_exists($fullPath)) {
+                                $fullPath = Storage::disk('public')->path($documentPath);
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Fallback to local disk paths
+                        $fullPath = Storage::disk('local')->path($documentPath);
+                        if (!file_exists($fullPath)) {
+                            $fullPath = Storage::disk('public')->path($documentPath);
+                        }
                     }
                     
                     if (file_exists($fullPath)) {
@@ -83,8 +115,10 @@ class RequirementsGenerationService
                     }
                 } else {
                     // Read other text-based files
-                    // Try local disk first, then public
-                    if (Storage::disk('local')->exists($documentPath)) {
+                    // Try default disk first (S3), then fallback to local disks
+                    if (Storage::exists($documentPath)) {
+                        $content = Storage::get($documentPath);
+                    } elseif (Storage::disk('local')->exists($documentPath)) {
                         $content = Storage::disk('local')->get($documentPath);
                     } elseif (Storage::disk('public')->exists($documentPath)) {
                         $content = Storage::disk('public')->get($documentPath);

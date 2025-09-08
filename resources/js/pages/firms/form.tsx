@@ -225,13 +225,21 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
 
     const pageTitle = !firm?.id ? 'New Firm' : (data.name || 'Firm');
     
+    // Simplified breadcrumbs for non-superadmins
+    const breadcrumbs = auth.user.role === 'superadmin' 
+        ? [
+            { title: 'Dashboard', href: '/dashboard' },
+            { title: 'Firms', href: '/firms' },
+            { title: pageTitle }
+        ]
+        : [
+            { title: 'Dashboard', href: '/dashboard' },
+            { title: pageTitle }
+        ];
+    
     return (
         <AppLayout
-            breadcrumbs={[
-                { title: 'Dashboard', href: '/dashboard' },
-                { title: 'Firms', href: '/firms' },
-                { title: pageTitle }
-            ]}
+            breadcrumbs={breadcrumbs}
             headerActions={
                 <div className="flex items-center gap-2">
                     {firm?.id && (

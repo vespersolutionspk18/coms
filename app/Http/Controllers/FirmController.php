@@ -15,6 +15,17 @@ class FirmController extends Controller
      */
     public function index(Request $request)
     {
+        $user = auth()->user();
+        
+        // Non-superadmins should be redirected to their own firm
+        if (!$user->isSuperadmin()) {
+            if ($user->firm_id) {
+                return redirect()->route('firms.show', $user->firm_id);
+            } else {
+                abort(403, 'Access denied: You are not assigned to any firm.');
+            }
+        }
+        
         // Check if this is specifically an API call from the modal
         // by checking for a specific header or query parameter
         if ($request->header('X-Requested-For') === 'modal' || $request->query('for') === 'modal') {
@@ -102,7 +113,7 @@ class FirmController extends Controller
             abort(403, 'Access denied: You can only access your own firm.');
         }
 
-        $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
+        $firm->load('primaryContact', 'users', 'projects', 'documents');
         
         // Superadmins see all users, regular users only see users from their firm
         if ($user->isSuperadmin()) {
@@ -111,7 +122,7 @@ class FirmController extends Controller
         } else {
             $users = User::where('firm_id', $firm->id)->orderBy('name')->get();
             $projects = Project::whereHas('firms', function($query) use ($firm) {
-                $query->where('firm_id', $firm->id);
+                $query->where('firms.id', $firm->id);
             })->orderBy('title')->get();
         }
         
@@ -134,7 +145,7 @@ class FirmController extends Controller
             abort(403, 'Access denied: You can only access your own firm.');
         }
 
-        $firm->load('primaryContact', 'users', 'projects.pivot', 'documents');
+        $firm->load('primaryContact', 'users', 'projects', 'documents');
         
         // Superadmins see all users, regular users only see users from their firm
         if ($user->isSuperadmin()) {
@@ -143,7 +154,7 @@ class FirmController extends Controller
         } else {
             $users = User::where('firm_id', $firm->id)->orderBy('name')->get();
             $projects = Project::whereHas('firms', function($query) use ($firm) {
-                $query->where('firm_id', $firm->id);
+                $query->where('firms.id', $firm->id);
             })->orderBy('title')->get();
         }
         

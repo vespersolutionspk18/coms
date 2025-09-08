@@ -27,7 +27,7 @@ class ProjectController extends Controller
         } else {
             $projects = Project::with('firms', 'milestones')
                 ->whereHas('firms', function($query) use ($user) {
-                    $query->where('firm_id', $user->firm_id);
+                    $query->where('firms.id', $user->firm_id);
                 })
                 ->orderBy('created_at', 'desc')
                 ->paginate(20);
@@ -81,7 +81,7 @@ class ProjectController extends Controller
             'bid_security' => 'nullable|string',
             'status' => 'required|in:Active,Closed,On Hold',
             'pre_bid_expected_date' => 'nullable|date',
-            'advertisement' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max
+            'advertisement' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,pdf,doc,docx', // No size limit
             'firms' => 'nullable|array',
             'firms.*.id' => 'exists:firms,id',
             'firms.*.pivot.role_in_project' => 'sometimes|in:Lead JV,Subconsultant,Internal',
@@ -99,11 +99,11 @@ class ProjectController extends Controller
         $requirements = $validated['requirements'] ?? [];
         unset($validated['firms'], $validated['requirements']);
 
-        // Handle advertisement image upload
+        // Handle advertisement image upload using default disk (S3)
         if ($request->hasFile('advertisement')) {
             $file = $request->file('advertisement');
             $fileName = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('advertisements', $fileName, 'public');
+            $path = $file->storeAs('advertisements', $fileName);
             $validated['advertisement'] = $path;
         }
 
@@ -246,7 +246,7 @@ class ProjectController extends Controller
             'bid_security' => 'nullable|string',
             'status' => 'sometimes|required|in:Active,Closed,On Hold',
             'pre_bid_expected_date' => 'nullable|date',
-            'advertisement' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max
+            'advertisement' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,pdf,doc,docx', // No size limit
             'remove_advertisement' => 'sometimes|boolean',
             'firms' => 'nullable|array',
             'firms.*.id' => 'exists:firms,id',
@@ -267,21 +267,21 @@ class ProjectController extends Controller
         $removeAdvertisement = $validated['remove_advertisement'] ?? false;
         unset($validated['firms'], $validated['requirements'], $validated['remove_advertisement']);
 
-        // Handle advertisement image update
+        // Handle advertisement image update using default disk (S3)
         if ($request->hasFile('advertisement')) {
             // Delete old advertisement if exists
-            if ($project->advertisement && Storage::disk('public')->exists($project->advertisement)) {
-                Storage::disk('public')->delete($project->advertisement);
+            if ($project->advertisement && Storage::exists($project->advertisement)) {
+                Storage::delete($project->advertisement);
             }
             
             $file = $request->file('advertisement');
             $fileName = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('advertisements', $fileName, 'public');
+            $path = $file->storeAs('advertisements', $fileName);
             $validated['advertisement'] = $path;
         } elseif ($removeAdvertisement) {
             // Remove advertisement if requested
-            if ($project->advertisement && Storage::disk('public')->exists($project->advertisement)) {
-                Storage::disk('public')->delete($project->advertisement);
+            if ($project->advertisement && Storage::exists($project->advertisement)) {
+                Storage::delete($project->advertisement);
             }
             $validated['advertisement'] = null;
         }
@@ -389,8 +389,8 @@ class ProjectController extends Controller
     public function destroy(Project $project)
     {
         // Delete advertisement image if exists
-        if ($project->advertisement && Storage::disk('public')->exists($project->advertisement)) {
-            Storage::disk('public')->delete($project->advertisement);
+        if ($project->advertisement && Storage::exists($project->advertisement)) {
+            Storage::delete($project->advertisement);
         }
         
         $project->delete();

@@ -53,7 +53,7 @@ export function AppSidebar() {
             return [
                 ...baseItems,
                 {
-                    title: 'Firms',
+                    title: 'My Firm',
                     href: `/firms/${user.firm_id}`,
                     icon: Building2,
                 },

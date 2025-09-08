@@ -218,10 +218,10 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         client_email: project?.client_email || '',
         client_phone: project?.client_phone || '',
         documents_procurement: project?.documents_procurement || '',
-        stage: project?.stage || '',
+        stage: project?.stage || 'Identification',
         submission_date: formatDateForInput(project?.submission_date),
         bid_security: project?.bid_security || '',
-        status: project?.status || '',
+        status: project?.status || 'Active',
         pre_bid_expected_date: formatDateForInput(project?.pre_bid_expected_date),
         firms: Array.isArray(project?.firms) ? project.firms.map(firm => ({
             ...firm,
@@ -335,27 +335,26 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         if (!file) return;
 
         // Validate file type
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/svg+xml'];
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/svg+xml', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
         if (!allowedTypes.includes(file.type)) {
-            alert('Please upload only image files (JPEG, PNG, JPG, GIF, SVG)');
-            return;
-        }
-
-        // Validate file size (5MB)
-        if (file.size > 5 * 1024 * 1024) {
-            alert('File size must be less than 5MB');
+            alert('Please upload only image files (JPEG, PNG, JPG, GIF, SVG) or documents (PDF, DOC, DOCX)');
             return;
         }
 
         setAdvertisementFile(file);
         setRemoveAdvertisementFlag(false); // Reset remove flag when new file selected
         
-        // Create preview
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            setAdvertisementPreview(reader.result as string);
-        };
-        reader.readAsDataURL(file);
+        // Create preview only for images
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setAdvertisementPreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // For non-image files, set a placeholder or file name
+            setAdvertisementPreview(null);
+        }
     };
 
     const removeAdvertisement = () => {
@@ -477,19 +476,17 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             return;
         }
 
-        // Validate file size (10MB)
-        if (file.size > 10 * 1024 * 1024) {
-            alert('File size must be less than 10MB');
-            return;
-        }
-
         setUploadFile(file);
         setShowUploadDialog(true);
     };
 
     const handleDocumentUpload = async () => {
-        if (!uploadFile || !project?.id) return;
+        if (!uploadFile || !project?.id) {
+            console.log('Upload aborted - missing file or project:', { uploadFile: !!uploadFile, projectId: project?.id });
+            return;
+        }
 
+        console.log('Starting document upload:', { fileName: uploadFile.name, projectId: project.id, requirementId: uploadRequirementId });
         setUploadingDocument(true);
         const formData = new FormData();
         formData.append('file', uploadFile);
@@ -499,11 +496,13 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         }
 
         try {
+            console.log('Sending upload request...');
             const response = await axios.post('/documents', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
             });
+            console.log('Upload successful:', response.data);
             
             // Add new document to list
             setDocuments(prev => [response.data.document, ...prev]);
@@ -517,7 +516,9 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             setShowUploadDialog(false);
         } catch (error: any) {
             console.error('Error uploading document:', error);
-            alert(error.response?.data?.message || 'Failed to upload document');
+            console.error('Error response:', error.response?.data);
+            console.error('Error status:', error.response?.status);
+            alert(error.response?.data?.message || `Failed to upload document: ${error.message}`);
         } finally {
             setUploadingDocument(false);
         }
@@ -539,7 +540,10 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         window.open(`/documents/${documentId}/download`, '_blank');
     };
 
-    const getFileIcon = (fileName: string) => {
+    const getFileIcon = (fileName: string | null | undefined) => {
+        if (!fileName || typeof fileName !== 'string') {
+            return <FileText className="h-3 w-3 text-gray-400" />;
+        }
         const extension = fileName.split('.').pop()?.toLowerCase();
         if (extension === 'pdf') {
             return <FileText className="h-3 w-3 text-red-500" />;
@@ -576,19 +580,36 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     };
 
     const handleGenerateOverview = async () => {
-        // Check if we have an advertisement image
+        // Check if we have an advertisement file
         if (!advertisementPreview && !advertisementFile) {
-            alert('Please upload an advertisement image first');
+            alert('Please upload an advertisement document first');
             return;
         }
 
         setGeneratingOverview(true);
         try {
-            const imageData = advertisementPreview || '';
+            const formData = new FormData();
             
-            // Call the API
-            const response = await axios.post('/projects/generate-overview', {
-                image: imageData,
+            if (advertisementFile) {
+                // Send the file directly for both images and documents
+                formData.append('file', advertisementFile);
+            } else if (advertisementPreview && advertisementPreview.startsWith('data:')) {
+                // If we have base64 image data, send it as image
+                formData.append('image', advertisementPreview);
+            } else if (project?.advertisement) {
+                // If we have existing advertisement path, send the path
+                formData.append('advertisement_path', project.advertisement);
+            } else {
+                alert('No file found for analysis');
+                setGeneratingOverview(false);
+                return;
+            }
+            
+            // Call the API with multipart form data
+            const response = await axios.post('/projects/generate-overview', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
             });
 
             if (response.data.success) {
@@ -905,20 +926,32 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                     <div>
                                         <Label className="text-xs">Advertisement</Label>
                                         <div className="mt-0.5">
-                                            {advertisementPreview ? (
+                                            {advertisementFile || advertisementPreview ? (
                                                 <div className="relative">
-                                                    <a 
-                                                        href={advertisementPreview} 
-                                                        target="_blank" 
-                                                        rel="noopener noreferrer"
-                                                        className="block cursor-pointer hover:opacity-90 transition-opacity"
-                                                    >
-                                                        <img 
-                                                            src={advertisementPreview} 
-                                                            alt="Advertisement" 
-                                                            className="w-full h-32 object-cover rounded border"
-                                                        />
-                                                    </a>
+                                                    {advertisementPreview ? (
+                                                        <a 
+                                                            href={advertisementPreview} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="block cursor-pointer hover:opacity-90 transition-opacity"
+                                                        >
+                                                            <img 
+                                                                src={advertisementPreview} 
+                                                                alt="Advertisement" 
+                                                                className="w-full h-32 object-cover rounded border"
+                                                            />
+                                                        </a>
+                                                    ) : advertisementFile ? (
+                                                        <div className="border rounded p-4 bg-gray-50">
+                                                            <div className="flex items-center gap-2">
+                                                                <FileText className="h-6 w-6 text-gray-400" />
+                                                                <div>
+                                                                    <p className="text-sm font-medium">{advertisementFile.name}</p>
+                                                                    <p className="text-xs text-gray-500">Document uploaded</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
                                                     <Button
                                                         type="button"
                                                         size="sm"
@@ -934,12 +967,12 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                     <input
                                                         ref={advertisementInputRef}
                                                         type="file"
-                                                        accept="image/*"
+                                                        accept="image/*,.pdf,.doc,.docx"
                                                         onChange={handleAdvertisementSelect}
                                                         className="hidden"
                                                     />
                                                     <Upload className="h-6 w-6 mx-auto mb-1 text-gray-400" />
-                                                    <p className="text-xs text-gray-600 mb-1">Upload advertisement image</p>
+                                                    <p className="text-xs text-gray-600 mb-1">Upload advertisement document</p>
                                                     <Button
                                                         type="button"
                                                         size="sm"
@@ -949,7 +982,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                     >
                                                         Choose File
                                                     </Button>
-                                                    <p className="text-xs text-gray-500 mt-1">Max 5MB (JPEG, PNG, GIF, SVG)</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Images (JPEG, PNG, GIF, SVG) or Documents (PDF, DOC, DOCX)</p>
                                                 </div>
                                             )}
                                         </div>
@@ -1336,22 +1369,22 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                         </td>
                                                     </tr>
                                                 ) : (
-                                                    documents.map((doc) => (
+                                                    documents.filter(doc => doc && doc.id && doc.name).map((doc) => (
                                                         <tr 
                                                             key={doc.id} 
                                                             className="border-t hover:bg-gray-50 cursor-pointer"
                                                             onClick={(e) => {
                                                                 // Don't open if clicking on action buttons
-                                                                if (!(e.target as HTMLElement).closest('button')) {
+                                                                if (!(e.target as HTMLElement).closest('button') && doc?.id && doc?.name) {
                                                                     handleDocumentDownload(doc.id, doc.name);
                                                                 }
                                                             }}
                                                         >
                                                             <td className="px-2 py-1">
                                                                 <div className="flex items-center gap-1">
-                                                                    {getFileIcon(doc.name)}
-                                                                    <span className="truncate max-w-[200px]" title={doc.name}>
-                                                                        {doc.name}
+                                                                    {getFileIcon(doc?.name)}
+                                                                    <span className="truncate max-w-[200px]" title={doc?.name || 'Unknown file'}>
+                                                                        {doc?.name || 'Unknown file'}
                                                                     </span>
                                                                 </div>
                                                             </td>
@@ -1401,7 +1434,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                                         size="sm" 
                                                                         variant="ghost" 
                                                                         className="h-5 w-5 p-0"
-                                                                        onClick={() => handleDocumentDownload(doc.id, doc.name)}
+                                                                        onClick={() => doc?.id && doc?.name && handleDocumentDownload(doc.id, doc.name)}
                                                                         title="Download"
                                                                     >
                                                                         <Download className="h-3 w-3" />
@@ -1552,7 +1585,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                                                         onChange={(e) => toggleFirmDocument(firm.id, doc, e.target.checked)}
                                                                                     />
                                                                                     <FileText className="h-3 w-3 text-gray-400" />
-                                                                                    <span className="text-xs">{doc.name}</span>
+                                                                                    <span className="text-xs">{doc?.name || 'Unknown file'}</span>
                                                                                     {doc.category && (
                                                                                         <Badge variant="outline" className="text-xs py-0 px-1">
                                                                                             {doc.category}
