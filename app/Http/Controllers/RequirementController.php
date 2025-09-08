@@ -42,7 +42,7 @@ class RequirementController extends Controller
     {
         $validated = $request->validate([
             'project_id' => 'required|exists:projects,id',
-            'type' => 'required|in:document,personnel,financial,technical,legal,other',
+            'type' => 'required|string|max:255', // Allow ANY type
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'priority' => 'required|in:Critical,High,Medium,Low',
@@ -85,7 +85,7 @@ class RequirementController extends Controller
     public function update(Request $request, Requirement $requirement)
     {
         $validated = $request->validate([
-            'type' => 'sometimes|required|in:document,personnel,financial,technical,legal,other',
+            'type' => 'sometimes|required|string|max:255', // Allow ANY type
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'priority' => 'sometimes|required|in:Critical,High,Medium,Low',
@@ -108,5 +108,30 @@ class RequirementController extends Controller
         $requirement->delete();
         
         return redirect()->route('requirements.index');
+    }
+    
+    /**
+     * Clear all requirements for a specific project
+     */
+    public function clearAll($projectId)
+    {
+        try {
+            // Verify the project exists and belongs to the user
+            $project = Project::findOrFail($projectId);
+            
+            // Delete all requirements for this project
+            $deletedCount = Requirement::where('project_id', $projectId)->delete();
+            
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully deleted {$deletedCount} requirements",
+                'deleted_count' => $deletedCount
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to clear requirements: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

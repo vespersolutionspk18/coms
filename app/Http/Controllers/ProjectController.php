@@ -72,7 +72,9 @@ class ProjectController extends Controller
             'advertisement' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max
             'firms' => 'nullable|array',
             'firms.*.id' => 'exists:firms,id',
-            'firms.*.pivot.role_in_project' => 'sometimes|in:Lead JV,Partner,Subconsultant,Internal',
+            'firms.*.pivot.role_in_project' => 'sometimes|in:Lead JV,Subconsultant,Internal',
+            'firms.*.selectedDocuments' => 'sometimes|array',
+            'firms.*.selectedDocuments.*.id' => 'sometimes|exists:documents,id',
             'requirements' => 'nullable|array',
             'requirements.*.type' => 'required|string|max:100',
             'requirements.*.title' => 'required|string',
@@ -95,10 +97,24 @@ class ProjectController extends Controller
 
         $project = Project::create($validated);
 
-        // Attach firms with their roles
+        // Attach firms with their roles and selected documents
         foreach ($firms as $firm) {
-            $role = $firm['pivot']['role_in_project'] ?? 'Partner';
-            $project->firms()->attach($firm['id'], ['role_in_project' => $role]);
+            $role = $firm['pivot']['role_in_project'] ?? 'Subconsultant';
+            $selectedDocIds = [];
+            
+            // Extract selected document IDs
+            if (isset($firm['selectedDocuments']) && is_array($firm['selectedDocuments'])) {
+                foreach ($firm['selectedDocuments'] as $doc) {
+                    if (isset($doc['id'])) {
+                        $selectedDocIds[] = $doc['id'];
+                    }
+                }
+            }
+            
+            $project->firms()->attach($firm['id'], [
+                'role_in_project' => $role,
+                'selected_documents' => json_encode($selectedDocIds)
+            ]);
         }
 
         // Create requirements
@@ -119,7 +135,6 @@ class ProjectController extends Controller
             'requirements.assignedFirm',
             'requirements.assignedUser',
             'tasks.assignedUser',
-            'tasks.requirement',
             'tasks.assignedFirm',
             'documents.uploadedBy',
             'documents.firm',
@@ -142,17 +157,42 @@ class ProjectController extends Controller
      */
     public function edit(Project $project)
     {
+        \Log::info('Edit method called for project ' . $project->id);
+        
         $project->load([
-            'firms',
+            'firms.documents',
             'requirements.assignedFirm',
             'requirements.assignedUser',
             'tasks.assignedUser',
-            'tasks.requirement',
             'tasks.assignedFirm',
             'documents.uploadedBy',
             'documents.firm',
             'milestones'
         ]);
+        
+        \Log::info('Loaded ' . $project->firms->count() . ' firms for project');
+        
+        // Add documents to each firm in the project and decode selected documents
+        $project->firms->each(function ($firm) {
+            $firm->documents = $firm->documents()->select('id', 'name', 'category', 'created_at')->get();
+            
+            // Decode selected documents from pivot
+            \Log::info('Loading firm ' . $firm->id . ' with pivot data: ' . json_encode($firm->pivot->toArray()));
+            
+            if ($firm->pivot->selected_documents) {
+                $selectedIds = json_decode($firm->pivot->selected_documents, true) ?? [];
+                \Log::info('Decoded selected document IDs for firm ' . $firm->id . ': ' . json_encode($selectedIds));
+                
+                $firm->selectedDocuments = $firm->documents->filter(function ($doc) use ($selectedIds) {
+                    return in_array($doc->id, $selectedIds);
+                })->values();
+                
+                \Log::info('Firm ' . $firm->id . ' has ' . $firm->selectedDocuments->count() . ' selected documents');
+            } else {
+                \Log::info('Firm ' . $firm->id . ' has no selected_documents in pivot');
+                $firm->selectedDocuments = [];
+            }
+        });
         
         $firms = Firm::where('status', 'Active')->get();
         $users = User::select('id', 'name', 'email')->get();
@@ -198,7 +238,9 @@ class ProjectController extends Controller
             'remove_advertisement' => 'sometimes|boolean',
             'firms' => 'nullable|array',
             'firms.*.id' => 'exists:firms,id',
-            'firms.*.pivot.role_in_project' => 'sometimes|in:Lead JV,Partner,Subconsultant,Internal',
+            'firms.*.pivot.role_in_project' => 'sometimes|in:Lead JV,Subconsultant,Internal',
+            'firms.*.selectedDocuments' => 'sometimes|array',
+            'firms.*.selectedDocuments.*.id' => 'sometimes|exists:documents,id',
             'requirements' => 'nullable|array',
             'requirements.*.id' => 'sometimes|integer',
             'requirements.*.type' => 'required|string|max:100',
@@ -238,8 +280,24 @@ class ProjectController extends Controller
         if ($firms !== null) {
             $syncData = [];
             foreach ($firms as $firm) {
-                $role = $firm['pivot']['role_in_project'] ?? 'Partner';
-                $syncData[$firm['id']] = ['role_in_project' => $role];
+                $role = $firm['pivot']['role_in_project'] ?? 'Subconsultant';
+                $selectedDocIds = [];
+                
+                // Extract selected document IDs
+                if (isset($firm['selectedDocuments']) && is_array($firm['selectedDocuments'])) {
+                    foreach ($firm['selectedDocuments'] as $doc) {
+                        if (isset($doc['id'])) {
+                            $selectedDocIds[] = $doc['id'];
+                        }
+                    }
+                }
+                
+                \Log::info('Saving firm ' . $firm['id'] . ' with selected documents: ' . json_encode($selectedDocIds));
+                
+                $syncData[$firm['id']] = [
+                    'role_in_project' => $role,
+                    'selected_documents' => json_encode($selectedDocIds)
+                ];
             }
             $project->firms()->sync($syncData);
         }
@@ -266,7 +324,51 @@ class ProjectController extends Controller
             $project->requirements()->whereNotIn('id', $updatedIds)->delete();
         }
 
-        return redirect()->back()->with('success', 'Project updated successfully');
+        \Log::info('Update complete, returning Inertia response');
+        
+        // Load fresh data for the response
+        $project->load([
+            'firms.documents',
+            'requirements.assignedFirm',
+            'requirements.assignedUser',
+            'tasks.assignedUser',
+            'tasks.assignedFirm',
+            'documents.uploadedBy',
+            'documents.firm',
+            'milestones'
+        ]);
+        
+        // Add documents to each firm in the project and decode selected documents
+        $project->firms->each(function ($firm) {
+            $firm->documents = $firm->documents()->select('id', 'name', 'category', 'created_at')->get();
+            
+            // Decode selected documents from pivot
+            \Log::info('Processing firm ' . $firm->id . ' with pivot: ' . json_encode($firm->pivot->toArray()));
+            
+            if ($firm->pivot->selected_documents) {
+                $selectedIds = json_decode($firm->pivot->selected_documents, true) ?? [];
+                \Log::info('Firm ' . $firm->id . ' selected doc IDs: ' . json_encode($selectedIds));
+                
+                $firm->selectedDocuments = $firm->documents->filter(function ($doc) use ($selectedIds) {
+                    return in_array($doc->id, $selectedIds);
+                })->values();
+                
+                \Log::info('Firm ' . $firm->id . ' has ' . $firm->selectedDocuments->count() . ' selected documents after filtering');
+            } else {
+                $firm->selectedDocuments = [];
+            }
+        });
+        
+        $firms = Firm::where('status', 'Active')->get();
+        $users = User::select('id', 'name', 'email')->get();
+        
+        // Return Inertia response with updated data
+        return Inertia::render('projects/edit', [
+            'project' => $project,
+            'firms' => $firms,
+            'users' => $users,
+            'requirements' => $project->requirements
+        ])->with('success', 'Project updated successfully');
     }
 
     /**

@@ -201,4 +201,102 @@ class DocumentController extends Controller
 
         return Storage::disk('local')->download($document->file_path, $document->name);
     }
+
+    /**
+     * Get documents for a specific firm
+     */
+    public function firmDocuments($firmId)
+    {
+        $documents = Document::where('firm_id', $firmId)
+            ->with('uploadedBy')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($documents);
+    }
+
+    /**
+     * Store a document for a specific firm
+     */
+    public function storeFirmDocument(Request $request, $firmId)
+    {
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:pdf,doc,docx,txt,png,jpg,jpeg,gif,xlsx,xls,csv|max:10240',
+            'name' => 'required|string|max:255',
+            'category' => 'nullable|string|max:255',
+        ]);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $fileName = $validated['name'];
+            
+            // Generate unique filename
+            $uniqueFileName = Str::uuid() . '_' . preg_replace('/[^A-Za-z0-9\-\_\.]/', '_', $file->getClientOriginalName());
+            
+            // Store file in storage/app/private/documents
+            $path = $file->storeAs('documents', $uniqueFileName, 'local');
+            
+            $document = Document::create([
+                'name' => $fileName,
+                'category' => $validated['category'] ?? null,
+                'file_path' => $path,
+                'uploaded_by' => auth()->id(),
+                'firm_id' => $firmId,
+                'status' => 'Approved',
+                'version' => 1,
+            ]);
+
+            return response()->json([
+                'message' => 'Document uploaded successfully',
+                'document' => $document->load('uploadedBy')
+            ], 201);
+        }
+
+        return response()->json(['message' => 'No file uploaded'], 400);
+    }
+
+    /**
+     * Update a firm document
+     */
+    public function updateFirmDocument(Request $request, $firmId, Document $document)
+    {
+        // Ensure document belongs to this firm
+        if ($document->firm_id != $firmId) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'category' => 'nullable|string|max:255',
+        ]);
+
+        $document->update($validated);
+
+        return response()->json([
+            'message' => 'Document updated successfully',
+            'document' => $document->fresh('uploadedBy')
+        ]);
+    }
+
+    /**
+     * Delete a firm document
+     */
+    public function destroyFirmDocument($firmId, Document $document)
+    {
+        // Ensure document belongs to this firm
+        if ($document->firm_id != $firmId) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        // Delete the physical file
+        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
+            Storage::disk('local')->delete($document->file_path);
+        }
+
+        $document->delete();
+
+        return response()->json([
+            'message' => 'Document deleted successfully'
+        ]);
+    }
 }

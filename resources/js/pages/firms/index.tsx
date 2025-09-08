@@ -55,6 +55,7 @@ export default function FirmsIndex({ firms }: Props) {
                 enableExport={true}
                 enableImport={true}
                 defaultPageSize={50}
+                rowClickRoute="firms"
             />
         </AppLayout>
     );

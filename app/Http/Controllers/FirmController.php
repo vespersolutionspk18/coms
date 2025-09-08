@@ -13,8 +13,15 @@ class FirmController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
+        // Check if this is specifically an API call from the modal
+        // by checking for a specific header or query parameter
+        if ($request->header('X-Requested-For') === 'modal' || $request->query('for') === 'modal') {
+            $firms = Firm::where('status', 'Active')->get();
+            return response()->json($firms);
+        }
+        
         $firms = Firm::with('primaryContact', 'users')->paginate(20);
         
         return Inertia::render('firms/index', [

@@ -17,7 +17,7 @@ class TaskController extends Controller
     {
         $projectId = $request->get('project_id');
         
-        $query = Task::with(['assignedUser', 'requirement', 'assignedFirm']);
+        $query = Task::with(['assignedUser', 'assignedFirm']);
         
         if ($projectId) {
             $query->where('project_id', $projectId);
@@ -43,7 +43,6 @@ class TaskController extends Controller
     {
         $validated = $request->validate([
             'project_id' => 'required|exists:projects,id',
-            'requirement_id' => 'nullable|exists:requirements,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'assigned_user_id' => 'nullable|exists:users,id',
@@ -59,7 +58,7 @@ class TaskController extends Controller
         }
         
         $task = Task::create($validated);
-        $task->load(['assignedUser', 'requirement', 'assignedFirm']);
+        $task->load(['assignedUser', 'assignedFirm']);
         
         return response()->json($task, 201);
     }
@@ -69,7 +68,7 @@ class TaskController extends Controller
      */
     public function show(string $id)
     {
-        $task = Task::with(['assignedUser', 'requirement', 'assignedFirm', 'subtasks', 'documents'])
+        $task = Task::with(['assignedUser', 'assignedFirm', 'subtasks', 'documents'])
             ->findOrFail($id);
         
         return response()->json($task);
@@ -92,7 +91,6 @@ class TaskController extends Controller
         
         $validated = $request->validate([
             'project_id' => 'sometimes|required|exists:projects,id',
-            'requirement_id' => 'nullable|exists:requirements,id',
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'assigned_user_id' => 'nullable|exists:users,id',
@@ -104,7 +102,7 @@ class TaskController extends Controller
         ]);
         
         $task->update($validated);
-        $task->load(['assignedUser', 'requirement', 'assignedFirm']);
+        $task->load(['assignedUser', 'assignedFirm']);
         
         return response()->json($task);
     }
@@ -132,7 +130,7 @@ class TaskController extends Controller
         ]);
         
         $task->update(['status' => $validated['status']]);
-        $task->load(['assignedUser', 'requirement', 'assignedFirm']);
+        $task->load(['assignedUser', 'assignedFirm']);
         
         return response()->json($task);
     }

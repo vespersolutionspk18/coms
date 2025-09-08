@@ -11,6 +11,7 @@ class Document extends Model
 
     protected $fillable = [
         'name',
+        'category',
         'file_path',
         'parsed_text',
         'uploaded_by',

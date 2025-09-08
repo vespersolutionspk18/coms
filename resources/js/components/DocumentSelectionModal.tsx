@@ -3,9 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { FileText, Loader2, Search } from 'lucide-react';
+import { FileText, Loader2, Search, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { format } from 'date-fns';
 import axios from '@/lib/axios';
 
@@ -39,6 +41,20 @@ export default function DocumentSelectionModal({
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [loadingDocuments, setLoadingDocuments] = useState(false);
+    const [progressData, setProgressData] = useState<{
+        show: boolean;
+        progress: number;
+        message: string;
+        stage?: string;
+        totalTypes?: number;
+        processedTypes?: number;
+        totalExtracted?: number;
+        error?: string;
+    }>({
+        show: false,
+        progress: 0,
+        message: ''
+    });
 
     useEffect(() => {
         if (open && projectId) {
@@ -83,9 +99,131 @@ export default function DocumentSelectionModal({
     };
 
     const handleGenerate = () => {
-        if (selectedDocumentIds.length > 0) {
-            onGenerate(selectedDocumentIds);
-        }
+        if (selectedDocumentIds.length === 0) return;
+        
+        // Show progress bar
+        setProgressData({
+            show: true,
+            progress: 0,
+            message: 'Initializing requirement extraction...'
+        });
+        
+        // Create EventSource for SSE (using SSE-specific endpoint)
+        const url = `/projects/generate-requirements-sse?${new URLSearchParams({
+            project_id: projectId.toString(),
+            ...selectedDocumentIds.reduce((acc, id, index) => ({
+                ...acc,
+                [`document_ids[${index}]`]: id.toString()
+            }), {})
+        })}`;
+        
+        const eventSource = new EventSource(url);
+        
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            switch (data.type) {
+                case 'ping':
+                    // Keepalive ping, just log it
+                    console.log('SSE keepalive ping received');
+                    break;
+                    
+                case 'retry':
+                    // Show retry message
+                    setProgressData(prev => ({
+                        ...prev,
+                        message: data.message || 'Retrying...',
+                        stage: 'retry'
+                    }));
+                    break;
+                    
+                case 'progress':
+                    setProgressData({
+                        show: true,
+                        progress: data.progress || 0,
+                        message: data.message || 'Processing...',
+                        stage: data.stage,
+                        totalTypes: data.total_types,
+                        processedTypes: data.processed_types,
+                        totalExtracted: data.total_extracted
+                    });
+                    break;
+                    
+                case 'complete':
+                    setProgressData({
+                        show: true,
+                        progress: 100,
+                        message: data.message || 'Requirements generated successfully!',
+                        totalExtracted: data.data?.length
+                    });
+                    
+                    // Close EventSource
+                    eventSource.close();
+                    
+                    // Call the original onGenerate with the data
+                    if (data.data) {
+                        onGenerate(data.data);
+                    }
+                    
+                    // Hide progress after a delay
+                    setTimeout(() => {
+                        setProgressData({
+                            show: false,
+                            progress: 0,
+                            message: ''
+                        });
+                        onOpenChange(false);
+                        setSelectedDocumentIds([]);
+                        setSearchQuery('');
+                    }, 2000);
+                    break;
+                    
+                case 'error':
+                    setProgressData({
+                        show: true,
+                        progress: 0,
+                        message: 'Error occurred',
+                        error: data.error || 'An unexpected error occurred'
+                    });
+                    
+                    // Close EventSource
+                    eventSource.close();
+                    
+                    // Hide error after delay
+                    setTimeout(() => {
+                        setProgressData({
+                            show: false,
+                            progress: 0,
+                            message: ''
+                        });
+                    }, 5000);
+                    break;
+                    
+                case 'end':
+                    eventSource.close();
+                    break;
+            }
+        };
+        
+        eventSource.onerror = (error) => {
+            console.error('SSE Error:', error);
+            eventSource.close();
+            
+            setProgressData({
+                show: true,
+                progress: 0,
+                message: 'Connection error',
+                error: 'Failed to connect to the server. Please try again.'
+            });
+            
+            setTimeout(() => {
+                setProgressData({
+                    show: false,
+                    progress: 0,
+                    message: ''
+                });
+            }, 5000);
+        };
     };
 
     const getFileIcon = (fileName: string) => {
@@ -108,7 +246,59 @@ export default function DocumentSelectionModal({
                     </p>
                 </DialogHeader>
                 
-                <div className="space-y-4">
+                {/* Progress Section */}
+                {progressData.show && (
+                    <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                        {progressData.error ? (
+                            <Alert variant="destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>{progressData.error}</AlertDescription>
+                            </Alert>
+                        ) : (
+                            <>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="font-medium">{progressData.message}</span>
+                                    <span className="text-gray-500">{Math.round(progressData.progress)}%</span>
+                                </div>
+                                <Progress value={progressData.progress} className="h-2" />
+                                
+                                {/* Additional details */}
+                                <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                                    {progressData.totalTypes && (
+                                        <Badge variant="outline" className="text-xs">
+                                            {progressData.processedTypes || 0}/{progressData.totalTypes} categories
+                                        </Badge>
+                                    )}
+                                    {progressData.totalExtracted && (
+                                        <Badge variant="outline" className="text-xs">
+                                            {progressData.totalExtracted} requirements found
+                                        </Badge>
+                                    )}
+                                    {progressData.stage === 'extracting' && (
+                                        <div className="flex items-center gap-1">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <span>Processing...</span>
+                                        </div>
+                                    )}
+                                    {progressData.stage === 'retry' && (
+                                        <div className="flex items-center gap-1 text-yellow-600">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <span>Retrying...</span>
+                                        </div>
+                                    )}
+                                    {progressData.progress === 100 && (
+                                        <div className="flex items-center gap-1 text-green-600">
+                                            <CheckCircle2 className="h-3 w-3" />
+                                            <span>Complete!</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+                
+                <div className="space-y-4" style={{ display: progressData.show ? 'none' : 'block' }}>
                     <div className="flex items-center gap-2">
                         <div className="relative flex-1">
                             <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />

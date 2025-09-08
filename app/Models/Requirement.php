@@ -28,14 +28,9 @@ class Requirement extends Model
 
     public function setTypeAttribute($value)
     {
-        $validTypes = ['document', 'personnel', 'financial', 'technical', 'legal', 'other'];
-        $value = strtolower($value);
-        
-        if (!in_array($value, $validTypes)) {
-            $value = 'other';
-        }
-        
-        $this->attributes['type'] = $value;
+        // Simply store the type as-is, allowing any type of requirement
+        // Normalize to title case for consistency
+        $this->attributes['type'] = ucfirst(strtolower(trim($value)));
     }
 
     public function project()

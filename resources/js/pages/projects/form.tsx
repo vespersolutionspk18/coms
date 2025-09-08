@@ -16,12 +16,13 @@ import { cn } from '@/lib/utils';
 import TaskKanban from '@/components/TaskKanban';
 import Timeline from '@/components/Timeline';
 import DocumentSelectionModal from '@/components/DocumentSelectionModal';
+import FirmSelectionModal from '@/components/FirmSelectionModal';
 import {
     FileText, Users, CheckSquare, FolderOpen, Building2, Calendar,
     Plus, Edit2, Save, X, ChevronRight, Clock, AlertCircle,
     DollarSign, Briefcase, Target, TrendingUp, Trash2, Eye,
     Download, Upload, Filter, Search, MoreVertical, Link2,
-    Kanban, List, CalendarDays, ChevronDown, Sparkles
+    Kanban, List, CalendarDays, ChevronDown, Sparkles, ChevronUp
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -63,6 +64,23 @@ interface Props {
 
 export default function ProjectForm({ project, firms = [], users = [] }: Props) {
     const { auth } = usePage().props as any;
+    
+    // Debug initial project data
+    useEffect(() => {
+        console.log('Initial project prop:', project);
+        if (project?.firms) {
+            console.log('Initial project firms:', project.firms);
+            project.firms.forEach((firm: any) => {
+                console.log(`Initial firm ${firm.name}:`, {
+                    selectedDocuments: firm.selectedDocuments,
+                    selectedDocumentsLength: firm.selectedDocuments?.length,
+                    documents: firm.documents,
+                    documentsLength: firm.documents?.length,
+                    pivot: firm.pivot
+                });
+            });
+        }
+    }, [project]); // Watch for project changes
     // Preserve tab state using URL hash or localStorage
     const [activeTab, setActiveTab] = useState(() => {
         // Check URL hash first
@@ -101,6 +119,11 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     const [generatingOverview, setGeneratingOverview] = useState(false);
     const [showDocumentSelectionModal, setShowDocumentSelectionModal] = useState(false);
     const [generatingRequirements, setGeneratingRequirements] = useState(false);
+    const [showFirmSelectionModal, setShowFirmSelectionModal] = useState(false);
+    const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
+    const [expandedFirms, setExpandedFirms] = useState<Set<number>>(new Set());
+    const [firmDocuments, setFirmDocuments] = useState<{ [key: number]: any[] }>({});
+    const [forceUpdate, setForceUpdate] = useState(0);
 
     // Fetch documents when project changes or tab is selected
     useEffect(() => {
@@ -125,6 +148,68 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         return date.toISOString().split('T')[0];
     };
 
+    const toggleTypeCollapse = (type: string) => {
+        setCollapsedTypes(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(type)) {
+                newSet.delete(type);
+            } else {
+                newSet.add(type);
+            }
+            return newSet;
+        });
+    };
+
+    const toggleFirmExpanded = (firmId: number) => {
+        setExpandedFirms(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(firmId)) {
+                newSet.delete(firmId);
+            } else {
+                newSet.add(firmId);
+                // Fetch firm documents if not already loaded
+                const firm = data.firms.find((f: any) => f.id === firmId);
+                if (firm && (!firm.documents || firm.documents.length === 0) && !firmDocuments[firmId]) {
+                    fetchFirmDocuments(firmId);
+                }
+            }
+            return newSet;
+        });
+    };
+
+    const fetchFirmDocuments = async (firmId: number, skipUpdate: boolean = false) => {
+        try {
+            const response = await axios.get(`/firms/${firmId}/documents`);
+            setFirmDocuments(prev => ({ ...prev, [firmId]: response.data }));
+            
+            // Only update firms if not skipping (to avoid overwriting during initial add)
+            if (!skipUpdate) {
+                setData('firms', data.firms.map((f: any) => 
+                    f.id === firmId ? { ...f, documents: response.data } : f
+                ));
+            }
+            
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching firm documents:', error);
+            return [];
+        }
+    };
+
+    const toggleFirmDocument = (firmId: number, document: any, isSelected: boolean) => {
+        setData('firms', data.firms.map((f: any) => {
+            if (f.id === firmId) {
+                const selectedDocs = f.selectedDocuments || [];
+                if (isSelected) {
+                    return { ...f, selectedDocuments: [...selectedDocs, document] };
+                } else {
+                    return { ...f, selectedDocuments: selectedDocs.filter((d: any) => d.id !== document.id) };
+                }
+            }
+            return f;
+        }));
+    };
+
     const { data, setData, post, put, processing, errors } = useForm<any>({
         title: project?.title || '',
         sector: project?.sector || '',
@@ -138,9 +223,21 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         bid_security: project?.bid_security || '',
         status: project?.status || '',
         pre_bid_expected_date: formatDateForInput(project?.pre_bid_expected_date),
-        firms: Array.isArray(project?.firms) ? project.firms : [],
+        firms: Array.isArray(project?.firms) ? project.firms.map(firm => ({
+            ...firm,
+            selectedDocuments: firm.selectedDocuments || [],
+            documents: firm.documents || []
+        })) : [],
         requirements: Array.isArray(project?.requirements) ? project.requirements : [],
     });
+    
+    // Debug: Log whenever firms data changes
+    useEffect(() => {
+        console.log('Data.firms changed:', data.firms);
+        data.firms.forEach((firm: any) => {
+            console.log(`Firm ${firm.name} has ${firm.selectedDocuments?.length || 0} selected documents:`, firm.selectedDocuments);
+        });
+    }, [data.firms]);
 
     const addScope = () => {
         if (newScope.trim()) {
@@ -193,8 +290,34 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     const addFirm = (firmId: number) => {
         const firm = firms.find(f => f.id === firmId);
         if (firm && !data.firms.some((f: any) => f.id === firmId)) {
-            setData('firms', [...data.firms, { ...firm, pivot: { role_in_project: 'Partner' } }]);
+            setData('firms', [...data.firms, { ...firm, pivot: { role_in_project: 'Subconsultant' } }]);
         }
+    };
+
+    const handleFirmSelection = async (firm: any) => {
+        console.log('handleFirmSelection called with firm:', firm);
+        console.log('Current data.firms before update:', data.firms);
+        
+        if (!data.firms.some((f: any) => f.id === firm.id)) {
+            // Fetch documents first
+            const documents = await fetchFirmDocuments(firm.id, true);
+            
+            const newFirm = { 
+                ...firm, 
+                pivot: { role_in_project: 'Subconsultant' },
+                selectedDocuments: [],
+                documents: documents
+            };
+            
+            const updatedFirms = [...data.firms, newFirm];
+            console.log('Updated firms array with documents:', updatedFirms);
+            
+            setData('firms', updatedFirms);
+            console.log('Called setData with new firms including documents');
+        } else {
+            console.log('Firm already exists in the list');
+        }
+        setShowFirmSelectionModal(false);
     };
 
     const removeFirm = (firmId: number) => {
@@ -500,41 +623,63 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         }
     };
 
-    const handleGenerateRequirements = async (selectedDocumentIds: number[]) => {
+    const handleGenerateRequirements = async (generatedRequirements: any) => {
         if (!project?.id) {
             alert('Please save the project first before generating requirements');
             setShowDocumentSelectionModal(false);
             return;
         }
 
-        setGeneratingRequirements(true);
-        try {
-            const response = await axios.post('/projects/generate-requirements', {
-                document_ids: selectedDocumentIds,
-                project_id: project.id
-            });
+        // If we receive the requirements directly (from SSE complete event)
+        if (Array.isArray(generatedRequirements)) {
+            // Merge new requirements with existing ones
+            const updatedRequirements = [...requirements, ...generatedRequirements];
+            setRequirements(updatedRequirements);
+            setData('requirements', updatedRequirements);
+            
+            // Show success message
+            alert(`${generatedRequirements.length} requirements generated successfully! Please review them in the requirements list.`);
+            
+            // Close the modal (handled by DocumentSelectionModal)
+            setGeneratingRequirements(false);
+        } else {
+            // This shouldn't happen with the new SSE approach
+            console.error('Unexpected format for generated requirements');
+            setGeneratingRequirements(false);
+        }
+    };
 
+    const handleClearAllRequirements = async () => {
+        if (!project?.id) {
+            alert('No project found');
+            return;
+        }
+
+        if (requirements.length === 0) {
+            return;
+        }
+
+        // Show confirmation dialog
+        if (!confirm(`Are you sure you want to delete all ${requirements.length} requirements? This action cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            // Call backend to delete all requirements
+            const response = await axios.delete(`/requirements/clear-all/${project.id}`);
+            
             if (response.data.success) {
-                const generatedRequirements = response.data.data;
+                // Clear from state
+                setRequirements([]);
+                setData('requirements', []);
                 
-                // Merge new requirements with existing ones
-                const updatedRequirements = [...requirements, ...generatedRequirements];
-                setRequirements(updatedRequirements);
-                setData('requirements', updatedRequirements);
-                
-                // Show success message
-                alert(`${generatedRequirements.length} requirements generated successfully! Please review them in the requirements list.`);
-                
-                // Close the modal
-                setShowDocumentSelectionModal(false);
+                alert('All requirements have been cleared successfully.');
             } else {
-                alert('Failed to generate requirements: ' + (response.data.error || 'Unknown error'));
+                alert('Failed to clear requirements: ' + (response.data.error || 'Unknown error'));
             }
         } catch (error: any) {
-            console.error('Error generating requirements:', error);
-            alert('Error generating requirements: ' + (error.response?.data?.error || error.message || 'Unknown error'));
-        } finally {
-            setGeneratingRequirements(false);
+            console.error('Error clearing requirements:', error);
+            alert('Failed to clear requirements: ' + (error.response?.data?.error || error.message || 'Unknown error'));
         }
     };
 
@@ -857,132 +1002,6 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                             </Card>
                         </div>
 
-                        <Card>
-                            <CardHeader className="px-2 py-1">
-                                <div className="flex items-center justify-between">
-                                    <CardTitle className="text-sm">Linked Firms</CardTitle>
-                                    <div className="flex gap-1">
-                                        <Select onValueChange={(value) => addFirm(parseInt(value))}>
-                                            <SelectTrigger className="h-6 text-xs w-32">
-                                                <SelectValue placeholder="Add firm..." />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {firms.filter((f: any) => !data.firms.some((df: any) => df.id === f.id)).map((firm: any) => (
-                                                    <SelectItem key={firm.id} value={firm.id.toString()}>
-                                                        {firm.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="px-2 py-1">
-                                <div className="border rounded-md overflow-hidden">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-gray-50">
-                                            <tr>
-                                                <th className="text-left px-2 py-1 font-medium">Firm Name</th>
-                                                <th className="text-left px-2 py-1 font-medium">Role</th>
-                                                <th className="text-left px-2 py-1 font-medium">Contact</th>
-                                                <th className="text-left px-2 py-1 font-medium">Status</th>
-                                                <th className="w-8"></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {(Array.isArray(data.firms) ? data.firms : []).map((firm: any, index: number) => (
-                                                <tr key={index} className="border-t">
-                                                    <td className="px-2 py-1">{firm.name}</td>
-                                                    <td className="px-2 py-1">
-                                                        <Select 
-                                                            value={firm.pivot?.role_in_project || 'Partner'}
-                                                            onValueChange={(value) => updateFirmRole(firm.id, value)}
-                                                        >
-                                                            <SelectTrigger className="h-5 text-xs w-24 border-0 p-0 focus:ring-0">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Lead JV">Lead JV</SelectItem>
-                                                                <SelectItem value="Partner">Partner</SelectItem>
-                                                                <SelectItem value="Subconsultant">Subconsultant</SelectItem>
-                                                                <SelectItem value="Internal">Internal</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </td>
-                                                    <td className="px-2 py-1">{firm.contact_email}</td>
-                                                    <td className="px-2 py-1">
-                                                        <Badge variant="secondary" className="text-xs py-0">
-                                                            {firm.status}
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="px-1">
-                                                        <Button 
-                                                            type="button" 
-                                                            size="sm" 
-                                                            variant="ghost" 
-                                                            className="h-5 w-5 p-0"
-                                                            onClick={() => removeFirm(firm.id)}
-                                                        >
-                                                            <X className="h-3 w-3 text-red-500" />
-                                                        </Button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <Card>
-                                <CardHeader className="px-2 py-1">
-                                    <CardTitle className="text-sm">Milestones</CardTitle>
-                                </CardHeader>
-                                <CardContent className="px-2 py-1">
-                                    <div className="space-y-1">
-                                        {project?.milestones?.map((milestone, index) => (
-                                            <div key={index} className="flex items-center justify-between p-2 border rounded">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={cn(
-                                                        "w-2 h-2 rounded-full",
-                                                        milestone.status === 'completed' ? 'bg-green-500' :
-                                                        milestone.status === 'in_progress' ? 'bg-blue-500' :
-                                                        'bg-gray-300'
-                                                    )} />
-                                                    <span className="text-sm">{milestone.title}</span>
-                                                </div>
-                                                <span className="text-xs text-gray-500">
-                                                    {milestone.due_date ? format(new Date(milestone.due_date), 'MMM d') : 'No date'}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </CardContent>
-                            </Card>
-
-                            <Card>
-                                <CardHeader className="px-2 py-1">
-                                    <CardTitle className="text-sm">AI Insights</CardTitle>
-                                </CardHeader>
-                                <CardContent className="px-2 py-1">
-                                    <div className="space-y-1 text-xs text-gray-600">
-                                        <div className="flex items-start gap-2">
-                                            <TrendingUp className="h-3 w-3 mt-0.5 text-blue-500" />
-                                            <span>Project on track with 85% requirements met</span>
-                                        </div>
-                                        <div className="flex items-start gap-2">
-                                            <AlertCircle className="h-3 w-3 mt-0.5 text-yellow-500" />
-                                            <span>2 critical documents pending review</span>
-                                        </div>
-                                        <div className="flex items-start gap-2">
-                                            <Target className="h-3 w-3 mt-0.5 text-green-500" />
-                                            <span>Recommended: Schedule pre-bid meeting</span>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </div>
                     </TabsContent>
 
                     <TabsContent value="requirements" className="mt-2">
@@ -1020,6 +1039,17 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                         <Button 
                                             type="button" 
                                             size="sm" 
+                                            variant="destructive" 
+                                            className="h-6 px-2"
+                                            onClick={() => handleClearAllRequirements()}
+                                            disabled={requirements.length === 0}
+                                        >
+                                            <Trash2 className="h-3 w-3 mr-1" />
+                                            Clear All
+                                        </Button>
+                                        <Button 
+                                            type="button" 
+                                            size="sm" 
                                             variant="default" 
                                             className="h-6 px-2"
                                             onClick={() => setShowAddRequirement(true)}
@@ -1043,13 +1073,22 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             
                                             return (
                                                 <div key={type}>
-                                                    <div className="flex items-center gap-2 mb-2">
+                                                    <div 
+                                                        className="flex items-center gap-2 mb-2 cursor-pointer hover:bg-gray-50 rounded px-2 py-1 -mx-2"
+                                                        onClick={() => toggleTypeCollapse(type)}
+                                                    >
+                                                        {collapsedTypes.has(type) ? (
+                                                            <ChevronRight className="h-3 w-3 transition-transform" />
+                                                        ) : (
+                                                            <ChevronDown className="h-3 w-3 transition-transform" />
+                                                        )}
                                                         <FolderOpen className="h-3 w-3" />
                                                         <span className="text-xs font-medium capitalize">{type}</span>
                                                         <Badge variant="secondary" className="text-xs py-0">{typeRequirements.length}</Badge>
                                                     </div>
-                                                <div className="space-y-1">
-                                                    {typeRequirements.map((req: any) => (
+                                                {!collapsedTypes.has(type) && (
+                                                    <div className="space-y-1 ml-5">
+                                                        {typeRequirements.map((req: any) => (
                                                         <div key={req.id} className="border rounded hover:bg-gray-50">
                                                             <div className="flex items-center justify-between p-2">
                                                                 <div className="flex items-center gap-2 flex-1">
@@ -1117,7 +1156,8 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                             </div>
                                                         </div>
                                                     ))}
-                                                </div>
+                                                    </div>
+                                                )}
                                                 {typeIndex < uniqueTypes.length - 1 && <Separator className="mt-3" />}
                                             </div>
                                             );
@@ -1171,7 +1211,6 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                             projectId={project.id} 
                                             users={users || []}
                                             firms={firms || []}
-                                            requirements={requirements}
                                         />
                                     ) : (
                                         <div className="text-center py-8 text-gray-500">
@@ -1395,12 +1434,16 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                             <CardHeader className="px-2 py-1">
                                 <div className="flex items-center justify-between">
                                     <CardTitle className="text-sm">Firms & Partners</CardTitle>
-                                    {(
-                                        <Button type="button" size="sm" variant="default" className="h-6 px-2">
-                                            <Plus className="h-3 w-3 mr-1" />
-                                            Add Firm
-                                        </Button>
-                                    )}
+                                    <Button 
+                                        type="button" 
+                                        size="sm" 
+                                        variant="default" 
+                                        className="h-6 px-2"
+                                        onClick={() => setShowFirmSelectionModal(true)}
+                                    >
+                                        <Plus className="h-3 w-3 mr-1" />
+                                        Add Firm
+                                    </Button>
                                 </div>
                             </CardHeader>
                             <CardContent className="px-2 py-1">
@@ -1408,68 +1451,138 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                     <table className="w-full text-xs">
                                         <thead className="bg-gray-50">
                                             <tr>
+                                                <th className="text-left px-2 py-1 font-medium w-8"></th>
                                                 <th className="text-left px-2 py-1 font-medium">Firm Name</th>
                                                 <th className="text-left px-2 py-1 font-medium">Role in Project</th>
-                                                <th className="text-left px-2 py-1 font-medium">Assigned Requirements</th>
-                                                <th className="text-left px-2 py-1 font-medium">Uploaded Documents</th>
+                                                <th className="text-left px-2 py-1 font-medium">Selected Documents</th>
                                                 <th className="text-left px-2 py-1 font-medium">Status</th>
                                                 <th className="w-8"></th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <tr className="border-t bg-blue-50">
-                                                <td className="px-2 py-1 font-medium">
-                                                    <div className="flex items-center gap-1">
-                                                        <Building2 className="h-3 w-3 text-blue-600" />
-                                                        Our Company
-                                                    </div>
-                                                </td>
-                                                <td className="px-2 py-1">
-                                                    <Badge className="text-xs py-0 bg-blue-100 text-blue-700">Lead</Badge>
-                                                </td>
-                                                <td className="px-2 py-1">
-                                                    <div className="flex items-center gap-1">
-                                                        <span>15</span>
-                                                        <span className="text-gray-400">/</span>
-                                                        <span className="text-green-600">12</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-2 py-1">8</td>
-                                                <td className="px-2 py-1">
-                                                    <Badge variant="secondary" className="text-xs py-0">Active</Badge>
-                                                </td>
-                                                <td className="px-1">
-                                                    <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0">
-                                                        <ChevronRight className="h-3 w-3" />
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                            {project?.firms?.map((firm, index) => (
-                                                <tr key={index} className="border-t hover:bg-gray-50">
-                                                    <td className="px-2 py-1 font-medium">{firm.name}</td>
-                                                    <td className="px-2 py-1">
-                                                        <Badge variant="outline" className="text-xs py-0">
-                                                            {firm.pivot?.role_in_project || 'Partner'}
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="px-2 py-1">
-                                                        <div className="flex items-center gap-1">
-                                                            <span>5</span>
-                                                            <span className="text-gray-400">/</span>
-                                                            <span className="text-green-600">3</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-2 py-1">3</td>
-                                                    <td className="px-2 py-1">
-                                                        <Badge variant="secondary" className="text-xs py-0">{firm.status}</Badge>
-                                                    </td>
-                                                    <td className="px-1">
-                                                        <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0">
-                                                            <ChevronRight className="h-3 w-3" />
-                                                        </Button>
+                                            {Array.isArray(data.firms) && data.firms.length > 0 ? data.firms.map((firm, index) => {
+                                                console.log(`Rendering firm ${firm.name}:`, {
+                                                    selectedDocuments: firm.selectedDocuments,
+                                                    selectedLength: firm.selectedDocuments?.length,
+                                                    documents: firm.documents,
+                                                    docsLength: firm.documents?.length
+                                                });
+                                                return (
+                                                <React.Fragment key={firm.id || index}>
+                                                    <tr className="border-t hover:bg-gray-50">
+                                                        <td className="px-2 py-1">
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-5 w-5 p-0"
+                                                                onClick={() => toggleFirmExpanded(firm.id)}
+                                                            >
+                                                                {expandedFirms.has(firm.id) ? (
+                                                                    <ChevronDown className="h-3 w-3" />
+                                                                ) : (
+                                                                    <ChevronRight className="h-3 w-3" />
+                                                                )}
+                                                            </Button>
+                                                        </td>
+                                                        <td className="px-2 py-1 font-medium">{firm.name}</td>
+                                                        <td className="px-2 py-1">
+                                                            <Select 
+                                                                value={firm.pivot?.role_in_project || 'Subconsultant'}
+                                                                onValueChange={(value) => updateFirmRole(firm.id, value)}
+                                                            >
+                                                                <SelectTrigger className="h-5 text-xs w-24 border-0 p-0 focus:ring-0">
+                                                                    <Badge variant="outline" className="text-xs py-0">
+                                                                        {firm.pivot?.role_in_project || 'Subconsultant'}
+                                                                    </Badge>
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="Lead JV">Lead JV</SelectItem>
+                                                                    <SelectItem value="Subconsultant">Subconsultant</SelectItem>
+                                                                    <SelectItem value="Internal">Internal</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </td>
+                                                        <td className="px-2 py-1">
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-blue-600">
+                                                                    {firm.selectedDocuments?.length || 0}
+                                                                </span>
+                                                                <span className="text-gray-400">/</span>
+                                                                <span className="text-gray-600">
+                                                                    {firm.documents?.length || 0}
+                                                                </span>
+                                                                <span className="text-xs text-gray-500 ml-1">documents</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-2 py-1">
+                                                            <Badge variant="secondary" className="text-xs py-0">{firm.status || 'Active'}</Badge>
+                                                        </td>
+                                                        <td className="px-1">
+                                                            <Button 
+                                                                type="button" 
+                                                                size="sm" 
+                                                                variant="ghost" 
+                                                                className="h-5 w-5 p-0"
+                                                                onClick={() => removeFirm(firm.id)}
+                                                                title="Remove firm"
+                                                            >
+                                                                <X className="h-3 w-3 text-red-500" />
+                                                            </Button>
+                                                        </td>
+                                                    </tr>
+                                                    {expandedFirms.has(firm.id) && (
+                                                        <tr>
+                                                            <td colSpan={6} className="px-2 py-2 bg-gray-50">
+                                                                <div className="ml-4">
+                                                                    <div className="text-xs font-medium text-gray-700 mb-2">
+                                                                        Available Documents from {firm.name}:
+                                                                    </div>
+                                                                    {firm.documents && firm.documents.length > 0 ? (
+                                                                        <div className="space-y-1">
+                                                                            {firm.documents.map((doc: any) => (
+                                                                                <div 
+                                                                                    key={doc.id} 
+                                                                                    className="flex items-center gap-2 p-1 rounded hover:bg-white"
+                                                                                >
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        className="h-3 w-3"
+                                                                                        checked={firm.selectedDocuments?.some((d: any) => d.id === doc.id) || false}
+                                                                                        onChange={(e) => toggleFirmDocument(firm.id, doc, e.target.checked)}
+                                                                                    />
+                                                                                    <FileText className="h-3 w-3 text-gray-400" />
+                                                                                    <span className="text-xs">{doc.name}</span>
+                                                                                    {doc.category && (
+                                                                                        <Badge variant="outline" className="text-xs py-0 px-1">
+                                                                                            {doc.category}
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                    {doc.created_at && (
+                                                                                        <span className="text-xs text-gray-500 ml-auto">
+                                                                                            {format(new Date(doc.created_at), 'MMM d, yyyy')}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="text-xs text-gray-500 italic">
+                                                                            No documents uploaded for this firm
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            )}) : (
+                                                <tr className="border-t">
+                                                    <td colSpan={6} className="text-center py-4 text-gray-500 text-sm">
+                                                        No firms added yet. Click "Add Firm" to add firms to this project.
                                                     </td>
                                                 </tr>
-                                            ))}
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -1655,6 +1768,13 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                 projectId={project?.id || 0}
                 onGenerate={handleGenerateRequirements}
                 loading={generatingRequirements}
+            />
+            
+            <FirmSelectionModal
+                open={showFirmSelectionModal}
+                onOpenChange={setShowFirmSelectionModal}
+                onSelectFirm={handleFirmSelection}
+                existingFirmIds={data.firms.map((f: any) => f.id)}
             />
         </AppLayout>
     );

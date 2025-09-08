@@ -139,3 +139,14 @@
         @apply bg-background text-foreground;
     }
 }
+
+/* Kanban smooth animations */
+@layer utilities {
+    .transform-gpu {
+        transform: translateZ(0);
+        will-change: transform;
+    }
+    
+    /* Drag and drop styles - DO NOT add transforms or transitions here! */
+    /* They interfere with the drag library's positioning */
+}

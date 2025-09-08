@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/layouts/app-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,9 +12,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import {
     Building2, Users, Save, Trash2, Star,
-    FileText, Briefcase, Plus, X, Shield, Clock, User
+    FileText, Briefcase, Plus, X, Shield, Clock, User, FolderOpen
 } from 'lucide-react';
 import { format } from 'date-fns';
+import FirmDocumentsTab, { FirmDocumentsTabRef } from '@/components/FirmDocumentsTab';
 
 interface Firm {
     id?: number;
@@ -50,9 +51,11 @@ interface Props {
 export default function FirmForm({ firm, users = [], projects = [] }: Props) {
     const { auth } = usePage().props as any;
     
+    const [activeTab, setActiveTab] = useState('general');
     const [newCapability, setNewCapability] = useState('');
     const [newCertification, setNewCertification] = useState('');
     const [selectedUsers, setSelectedUsers] = useState<any[]>(firm?.users || []);
+    const documentsTabRef = useRef<FirmDocumentsTabRef>(null);
     
     const formatDateForInput = (dateString: string | null | undefined) => {
         if (!dateString) return '';
@@ -106,8 +109,53 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
         setData('certifications', certifications);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
+    const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+        // Remove any existing notifications first
+        const existingNotifications = document.querySelectorAll('.custom-notification');
+        existingNotifications.forEach(n => n.remove());
+        
+        const notification = document.createElement('div');
+        notification.className = `custom-notification fixed top-20 right-4 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-3 rounded-md shadow-2xl flex items-center gap-2 transition-all transform translate-x-0 animate-slide-in`;
+        notification.style.cssText = 'z-index: 999999; animation: slideIn 0.3s ease-out;';
+        
+        if (type === 'success') {
+            notification.innerHTML = '<svg class="h-5 w-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span class="font-medium">' + message + '</span>';
+        } else {
+            notification.innerHTML = '<svg class="h-5 w-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg><span class="font-medium">' + message + '</span>';
+        }
+        
+        // Add animation styles if not already present
+        if (!document.querySelector('#notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'notification-styles';
+            style.textContent = `
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(notification);
+        setTimeout(() => {
+            notification.style.animation = 'slideIn 0.3s ease-out reverse';
+            setTimeout(() => notification.remove(), 300);
+        }, type === 'success' ? 3000 : 4000);
+    };
+
+    const handleSubmit = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        
+        // Check if there's a pending document upload
+        if (documentsTabRef.current?.hasPendingUpload() && firm?.id) {
+            showNotification('Uploading document...', 'success');
+            const uploadSuccess = await documentsTabRef.current.uploadPendingDocument();
+            if (!uploadSuccess) {
+                showNotification('Failed to upload document. Please try again.', 'error');
+                return;
+            }
+        }
         
         const submitData: any = {
             ...data,
@@ -118,19 +166,14 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
         if (!firm?.id) {
             router.post('/firms', submitData, {
                 preserveScroll: true,
+                onStart: () => {
+                    showNotification('Creating firm...', 'success');
+                },
                 onSuccess: () => {
-                    const notification = document.createElement('div');
-                    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center gap-2';
-                    notification.innerHTML = '<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>Firm created successfully!</span>';
-                    document.body.appendChild(notification);
-                    setTimeout(() => notification.remove(), 3000);
+                    showNotification('Firm created successfully!', 'success');
                 },
                 onError: () => {
-                    const notification = document.createElement('div');
-                    notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
-                    notification.textContent = 'Failed to create firm. Please check the form.';
-                    document.body.appendChild(notification);
-                    setTimeout(() => notification.remove(), 4000);
+                    showNotification('Failed to create firm. Please check the form.', 'error');
                 }
             });
         } else {
@@ -140,19 +183,14 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
             }, {
                 preserveScroll: true,
                 preserveState: false,
+                onStart: () => {
+                    showNotification('Saving firm...', 'success');
+                },
                 onSuccess: () => {
-                    const notification = document.createElement('div');
-                    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center gap-2';
-                    notification.innerHTML = '<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>Firm saved successfully!</span>';
-                    document.body.appendChild(notification);
-                    setTimeout(() => notification.remove(), 3000);
+                    showNotification('Firm saved successfully!', 'success');
                 },
                 onError: () => {
-                    const notification = document.createElement('div');
-                    notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
-                    notification.textContent = 'Failed to save firm. Please check the form.';
-                    document.body.appendChild(notification);
-                    setTimeout(() => notification.remove(), 4000);
+                    showNotification('Failed to save firm. Please check the form.', 'error');
                 }
             });
         }
@@ -160,7 +198,14 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
 
     const handleDelete = () => {
         if (firm?.id && confirm('Are you sure you want to delete this firm?')) {
-            router.delete(`/firms/${firm.id}`);
+            router.delete(`/firms/${firm.id}`, {
+                onSuccess: () => {
+                    showNotification('Firm deleted successfully!', 'success');
+                },
+                onError: () => {
+                    showNotification('Failed to delete firm.', 'error');
+                }
+            });
         }
     };
 
@@ -213,8 +258,8 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
                             </Button>
                         )}
                         <Button
-                            type="submit"
-                            form="firm-form"
+                            type="button"
+                            onClick={handleSubmit}
                             size="sm"
                             disabled={processing}
                             className={cn(
@@ -240,7 +285,45 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
         >
             <Head title={pageTitle} />
             
-            <form id="firm-form" onSubmit={handleSubmit} className="space-y-3 p-2">
+            {/* Tab Navigation */}
+            <div className="flex space-x-1 p-2 border-b border-gray-200">
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('general')}
+                    className={cn(
+                        "px-4 py-2 text-sm font-medium rounded-t-lg transition-colors",
+                        activeTab === 'general'
+                            ? "bg-white border border-b-0 border-gray-200 text-blue-600"
+                            : "text-gray-600 hover:text-gray-800"
+                    )}
+                >
+                    <Building2 className="h-4 w-4 inline mr-2" />
+                    General
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('documents')}
+                    className={cn(
+                        "px-4 py-2 text-sm font-medium rounded-t-lg transition-colors",
+                        activeTab === 'documents'
+                            ? "bg-white border border-b-0 border-gray-200 text-blue-600"
+                            : "text-gray-600 hover:text-gray-800"
+                    )}
+                >
+                    <FolderOpen className="h-4 w-4 inline mr-2" />
+                    Documents
+                    {firm?.documents && firm.documents.length > 0 && (
+                        <Badge variant="secondary" className="ml-2 text-xs">
+                            {firm.documents.length}
+                        </Badge>
+                    )}
+                </button>
+            </div>
+            
+            {/* Tab Content */}
+            <form id="firm-form" onSubmit={handleSubmit} style={{ display: 'contents' }}>
+                {activeTab === 'general' ? (
+                    <div className="space-y-3 p-2">
                 <div className="grid grid-cols-3 gap-4">
                     <Card className="col-span-2">
                         <CardHeader className="px-2 py-1">
@@ -573,6 +656,16 @@ export default function FirmForm({ firm, users = [], projects = [] }: Props) {
                         </CardContent>
                     </Card>
                 </div>
+                </div>
+                ) : (
+                    <div className="p-2">
+                        <FirmDocumentsTab 
+                            ref={documentsTabRef}
+                            firmId={firm?.id || null}
+                            isEditMode={!!firm?.id}
+                        />
+                    </div>
+                )}
             </form>
         </AppLayout>
     );

@@ -51,7 +51,7 @@ class Project extends Model
     public function firms()
     {
         return $this->belongsToMany(Firm::class, 'project_firms')
-            ->withPivot('role_in_project')
+            ->withPivot('role_in_project', 'selected_documents')
             ->withTimestamps();
     }
 
