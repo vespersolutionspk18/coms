@@ -27,7 +27,7 @@ class ProjectController extends Controller
         $projects = Cache::remember($cacheKey, 300, function() use ($user) {
             $query = Project::with([
                     'firms:id,name,status',
-                    'milestones:id,project_id,name,due_date,status'
+                    'milestones:id,project_id,title,due_date,status'
                 ])
                 ->select('id', 'title', 'sector', 'client', 'stage', 'status', 'submission_date', 'created_at', 'updated_at')
                 ->withCount(['tasks', 'requirements', 'documents']);
