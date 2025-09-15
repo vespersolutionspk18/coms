@@ -25,3 +25,9 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Security - PEM keys
+*.pem
+*.key
+*.crt
+*.cer
