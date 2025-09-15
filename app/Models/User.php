@@ -21,10 +21,19 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'role',
         'firm_id',
         'status',
         'notification_preferences',
+        'phone',
+    ];
+    
+    /**
+     * The attributes that should be guarded from mass assignment.
+     *
+     * @var list<string>
+     */
+    protected $guarded = [
+        'role', // Explicitly guard role field to prevent privilege escalation
     ];
 
     /**
@@ -92,6 +101,21 @@ class User extends Authenticatable
     }
 
     public function isSuperadmin()
+    {
+        return $this->role === 'superadmin';
+    }
+
+    public function isUser()
+    {
+        return $this->role === 'user';
+    }
+
+    public function hasManagementAccess()
+    {
+        return $this->role === 'superadmin';
+    }
+
+    public function hasProjectEditAccess()
     {
         return $this->role === 'superadmin';
     }

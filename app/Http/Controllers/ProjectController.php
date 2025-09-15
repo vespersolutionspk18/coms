@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class ProjectController extends Controller
 {
@@ -19,19 +21,27 @@ class ProjectController extends Controller
     public function index()
     {
         $user = auth()->user();
+        $page = request()->get('page', 1);
+        $cacheKey = "projects_index_{$user->id}_{$user->firm_id}_{$page}";
         
-        if ($user->isSuperadmin()) {
-            $projects = Project::with('firms', 'milestones')
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
-        } else {
-            $projects = Project::with('firms', 'milestones')
-                ->whereHas('firms', function($query) use ($user) {
-                    $query->where('firms.id', $user->firm_id);
-                })
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
-        }
+        $projects = Cache::remember($cacheKey, 300, function() use ($user) {
+            $query = Project::with([
+                    'firms:id,name,status',
+                    'milestones:id,project_id,name,due_date,status'
+                ])
+                ->select('id', 'title', 'sector', 'client', 'stage', 'status', 'submission_date', 'created_at', 'updated_at')
+                ->withCount(['tasks', 'requirements', 'documents']);
+            
+            if (!$user->isSuperadmin()) {
+                $query->whereHas('firms', function($q) use ($user) {
+                    $q->where('firms.id', $user->firm_id);
+                });
+            }
+            
+            return $query->orderBy('created_at', 'desc')
+                ->paginate(20)
+                ->withQueryString();
+        });
         
         return Inertia::render('projects/index', [
             'projects' => $projects
@@ -43,13 +53,31 @@ class ProjectController extends Controller
      */
     public function create()
     {
-        $firms = Firm::where('status', 'Active')->get();
-        $users = User::select('id', 'name', 'email')->get();
+        $user = auth()->user();
+        $cacheKey = "create_data_{$user->id}_{$user->firm_id}";
         
-        return Inertia::render('projects/create', [
-            'firms' => $firms,
-            'users' => $users
-        ]);
+        $data = Cache::remember($cacheKey, 600, function() use ($user) {
+            if ($user->isSuperadmin()) {
+                $firms = Firm::where('status', 'Active')
+                    ->select('id', 'name', 'status', 'created_at')
+                    ->get();
+                $users = User::select('id', 'name', 'email', 'firm_id')
+                    ->with('firm:id,name')
+                    ->get();
+            } else {
+                $firms = Firm::where('id', $user->firm_id)
+                    ->where('status', 'Active')
+                    ->select('id', 'name', 'status', 'created_at')
+                    ->get();
+                $users = User::select('id', 'name', 'email', 'firm_id')
+                    ->where('firm_id', $user->firm_id)
+                    ->get();
+            }
+            
+            return compact('firms', 'users');
+        });
+        
+        return Inertia::render('projects/create', $data);
     }
 
     /**
@@ -107,32 +135,67 @@ class ProjectController extends Controller
             $validated['advertisement'] = $path;
         }
 
-        $project = Project::create($validated);
+        // Use database transaction for consistency
+        $project = DB::transaction(function() use ($validated, $firms, $requirements, $request) {
+            $project = Project::create($validated);
 
-        // Attach firms with their roles and selected documents
-        foreach ($firms as $firm) {
-            $role = $firm['pivot']['role_in_project'] ?? 'Subconsultant';
-            $selectedDocIds = [];
-            
-            // Extract selected document IDs
-            if (isset($firm['selectedDocuments']) && is_array($firm['selectedDocuments'])) {
-                foreach ($firm['selectedDocuments'] as $doc) {
-                    if (isset($doc['id'])) {
-                        $selectedDocIds[] = $doc['id'];
+            // Validate firm relationships before attaching
+            $currentUser = auth()->user();
+            if (!$currentUser->isSuperadmin()) {
+                // Non-superadmins can only attach their own firm to projects
+                $allowedFirmIds = [$currentUser->firm_id];
+                foreach ($firms as $firm) {
+                    if (!in_array($firm['id'], $allowedFirmIds)) {
+                        abort(403, 'Access denied: You can only attach your own firm to projects.');
                     }
                 }
             }
-            
-            $project->firms()->attach($firm['id'], [
-                'role_in_project' => $role,
-                'selected_documents' => json_encode($selectedDocIds)
-            ]);
-        }
 
-        // Create requirements
-        foreach ($requirements as $requirement) {
-            $project->requirements()->create($requirement);
-        }
+            // Batch insert firms with their roles and selected documents
+            $firmAttachments = [];
+            foreach ($firms as $firm) {
+                $role = $firm['pivot']['role_in_project'] ?? 'Subconsultant';
+                $selectedDocIds = [];
+                
+                // Extract selected document IDs and validate ownership
+                if (isset($firm['selectedDocuments']) && is_array($firm['selectedDocuments'])) {
+                    $docIds = array_column($firm['selectedDocuments'], 'id');
+                    
+                    // Batch validate document ownership
+                    $validDocs = \App\Models\Document::whereIn('id', $docIds)
+                        ->where('firm_id', $firm['id'])
+                        ->pluck('id')
+                        ->toArray();
+                    
+                    if (count($validDocs) !== count($docIds)) {
+                        abort(403, 'Invalid document selection: Some documents do not belong to the specified firm.');
+                    }
+                    
+                    $selectedDocIds = $validDocs;
+                }
+                
+                $firmAttachments[$firm['id']] = [
+                    'role_in_project' => $role,
+                    'selected_documents' => json_encode($selectedDocIds)
+                ];
+            }
+            
+            // Attach all firms at once
+            if (!empty($firmAttachments)) {
+                $project->firms()->attach($firmAttachments);
+            }
+
+            // Batch create requirements
+            if (!empty($requirements)) {
+                $project->requirements()->createMany($requirements);
+            }
+            
+            // Clear relevant caches
+            Cache::forget("projects_index_{$currentUser->id}_{$currentUser->firm_id}_1");
+            Cache::forget("create_data_{$currentUser->id}_{$currentUser->firm_id}");
+            
+            return $project;
+        });
 
         return redirect()->route('projects.edit', $project)->with('success', 'Project created successfully');
     }
@@ -142,6 +205,13 @@ class ProjectController extends Controller
      */
     public function show(Project $project)
     {
+        $user = auth()->user();
+        
+        // Check if user can access this project
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to view this project.');
+        }
+        
         $project->load([
             'firms',
             'requirements.assignedFirm',
@@ -153,8 +223,18 @@ class ProjectController extends Controller
             'milestones'
         ]);
         
-        $firms = Firm::where('status', 'Active')->get();
-        $users = User::select('id', 'name', 'email')->get();
+        if ($user->isSuperadmin()) {
+            $firms = Firm::where('status', 'Active')->get();
+            $users = User::select('id', 'name', 'email')->get();
+        } else {
+            // Regular users can only see their own firm and users from their firm
+            $firms = Firm::where('id', $user->firm_id)
+                ->where('status', 'Active')
+                ->get();
+            $users = User::select('id', 'name', 'email')
+                ->where('firm_id', $user->firm_id)
+                ->get();
+        }
         
         return Inertia::render('projects/show', [
             'project' => $project,
@@ -169,6 +249,13 @@ class ProjectController extends Controller
      */
     public function edit(Project $project)
     {
+        $user = auth()->user();
+        
+        // Check if user can access this project
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to edit this project.');
+        }
+        
         \Log::info('Edit method called for project ' . $project->id);
         
         $project->load([
@@ -206,8 +293,18 @@ class ProjectController extends Controller
             }
         });
         
-        $firms = Firm::where('status', 'Active')->get();
-        $users = User::select('id', 'name', 'email')->get();
+        if ($user->isSuperadmin()) {
+            $firms = Firm::where('status', 'Active')->get();
+            $users = User::select('id', 'name', 'email')->get();
+        } else {
+            // Regular users can only see their own firm and users from their firm
+            $firms = Firm::where('id', $user->firm_id)
+                ->where('status', 'Active')
+                ->get();
+            $users = User::select('id', 'name', 'email')
+                ->where('firm_id', $user->firm_id)
+                ->get();
+        }
         
         return Inertia::render('projects/edit', [
             'project' => $project,
@@ -222,6 +319,13 @@ class ProjectController extends Controller
      */
     public function update(Request $request, Project $project)
     {
+        $user = auth()->user();
+        
+        // Check if user can access this project
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to update this project.');
+        }
+        
         // Decode JSON strings if coming from FormData
         if ($request->has('scope_of_work') && is_string($request->input('scope_of_work'))) {
             $request->merge(['scope_of_work' => json_decode($request->input('scope_of_work'), true)]);
@@ -286,19 +390,43 @@ class ProjectController extends Controller
             $validated['advertisement'] = null;
         }
 
-        $project->update($validated);
+        // Wrap update in transaction
+        DB::transaction(function() use ($project, $validated) {
+            $project->update($validated);
+        });
 
         // Update firms if provided
         if ($firms !== null) {
+            // Validate firm relationships before syncing
+            $currentUser = auth()->user();
+            if (!$currentUser->isSuperadmin()) {
+                // Get currently attached firm IDs for this project
+                $currentFirmIds = $project->firms()->pluck('firms.id')->toArray();
+                
+                // Non-superadmins can only work with firms they have access to
+                $allowedFirmIds = array_merge([$currentUser->firm_id], $currentFirmIds);
+                
+                foreach ($firms as $firm) {
+                    if (!in_array($firm['id'], $allowedFirmIds)) {
+                        abort(403, 'Access denied: You cannot attach firms you do not have access to.');
+                    }
+                }
+            }
+            
             $syncData = [];
             foreach ($firms as $firm) {
                 $role = $firm['pivot']['role_in_project'] ?? 'Subconsultant';
                 $selectedDocIds = [];
                 
-                // Extract selected document IDs
+                // Extract selected document IDs and validate ownership
                 if (isset($firm['selectedDocuments']) && is_array($firm['selectedDocuments'])) {
                     foreach ($firm['selectedDocuments'] as $doc) {
                         if (isset($doc['id'])) {
+                            // Validate that the document belongs to the firm
+                            $document = \App\Models\Document::find($doc['id']);
+                            if ($document && $document->firm_id != $firm['id']) {
+                                abort(403, 'Invalid document selection: Document does not belong to the specified firm.');
+                            }
                             $selectedDocIds[] = $doc['id'];
                         }
                     }
@@ -388,12 +516,25 @@ class ProjectController extends Controller
      */
     public function destroy(Project $project)
     {
+        $user = auth()->user();
+        
+        // Check if user can access this project
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to delete this project.');
+        }
+        
         // Delete advertisement image if exists
         if ($project->advertisement && Storage::exists($project->advertisement)) {
             Storage::delete($project->advertisement);
         }
         
-        $project->delete();
+        // Use transaction for delete
+        DB::transaction(function() use ($project) {
+            $project->delete();
+        });
+        
+        // Clear caches
+        Cache::forget("projects_index_{$user->id}_{$user->firm_id}_1");
         
         return redirect()->route('projects.index');
     }

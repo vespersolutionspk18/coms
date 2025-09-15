@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Traits\BelongsToTenant;
 
 class Project extends Model
 {
-    use HasFactory;
+    use HasFactory, BelongsToTenant;
 
     protected $fillable = [
         'title',
@@ -73,5 +74,52 @@ class Project extends Model
     public function aiMetadata()
     {
         return $this->morphMany(AiMetadata::class, 'entity');
+    }
+
+    /**
+     * Check if a user can attach a firm to this project
+     */
+    public function canAttachFirm($firmId, $user)
+    {
+        // Superadmins can attach any firm
+        if ($user->isSuperadmin()) {
+            return true;
+        }
+
+        // Check if the firm is already attached to the project
+        if ($this->firms()->where('firms.id', $firmId)->exists()) {
+            return true;
+        }
+
+        // Users can only attach their own firm
+        return $user->firm_id == $firmId;
+    }
+
+    /**
+     * Check if a user can attach a specific user to this project
+     */
+    public function canAssignUser($targetUserId, $user)
+    {
+        // Superadmins can assign any user
+        if ($user->isSuperadmin()) {
+            return true;
+        }
+
+        $targetUser = User::find($targetUserId);
+        if (!$targetUser) {
+            return false;
+        }
+
+        // Check if the target user's firm has access to this project
+        return $this->firms()->where('firms.id', $targetUser->firm_id)->exists();
+    }
+
+    /**
+     * Validate that a document belongs to the specified firm
+     */
+    public static function validateDocumentOwnership($documentId, $firmId)
+    {
+        $document = Document::find($documentId);
+        return $document && $document->firm_id == $firmId;
     }
 }

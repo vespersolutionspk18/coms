@@ -44,13 +44,17 @@ class RegisteredUserController extends Controller
             'firm_id' => 'required|exists:firms,id',
         ]);
 
-        $user = User::create([
+        // Create user without role in mass assignment
+        $user = new User([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'firm_id' => $request->firm_id,
-            'role' => 'user',
         ]);
+        
+        // Set role explicitly (not through mass assignment) to prevent privilege escalation
+        $user->role = 'consultant'; // Default role for self-registered users
+        $user->save();
 
         event(new Registered($user));
 

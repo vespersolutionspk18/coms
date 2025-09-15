@@ -45,6 +45,14 @@ class FirmController extends Controller
      */
     public function create()
     {
+        $user = auth()->user();
+        
+        // Only superadmins can create firms and see all users/projects
+        if (!$user->isSuperadmin()) {
+            abort(403, 'Access denied: Only superadmins can create firms.');
+        }
+        
+        // Superadmins can see all users and projects when creating a firm
         $users = User::orderBy('name')->get();
         $projects = Project::orderBy('title')->get();
         
@@ -59,6 +67,13 @@ class FirmController extends Controller
      */
     public function store(Request $request)
     {
+        $user = auth()->user();
+        
+        // Only superadmins can create firms
+        if (!$user->isSuperadmin()) {
+            abort(403, 'Access denied: Only superadmins can create firms.');
+        }
+        
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'type' => 'required|in:Internal,JV Partner',

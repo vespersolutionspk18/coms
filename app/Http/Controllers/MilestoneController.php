@@ -14,10 +14,17 @@ class MilestoneController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $user = auth()->user();
         $projectId = $request->get('project_id');
         
         if (!$projectId) {
             return response()->json(['error' => 'Project ID is required'], 400);
+        }
+        
+        // Validate user has access to the project
+        $project = Project::findOrFail($projectId);
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to view milestones for this project.');
         }
         
         $milestones = Milestone::where('project_id', $projectId)
@@ -33,6 +40,8 @@ class MilestoneController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $user = auth()->user();
+        
         $validated = $request->validate([
             'project_id' => 'required|exists:projects,id',
             'title' => 'required|string|max:255',
@@ -43,8 +52,24 @@ class MilestoneController extends Controller
             'requirement_ids.*' => 'exists:requirements,id'
         ]);
         
+        // Validate user has access to the project
+        $project = Project::findOrFail($validated['project_id']);
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You cannot create milestones for this project.');
+        }
+        
         $requirementIds = $validated['requirement_ids'] ?? [];
         unset($validated['requirement_ids']);
+        
+        // Validate all requirements belong to the same project
+        if (!empty($requirementIds)) {
+            $invalidReqs = \App\Models\Requirement::whereIn('id', $requirementIds)
+                ->where('project_id', '!=', $validated['project_id'])
+                ->exists();
+            if ($invalidReqs) {
+                abort(400, 'Invalid requirements: All requirements must belong to the same project.');
+            }
+        }
         
         $milestone = Milestone::create($validated);
         
@@ -62,7 +87,13 @@ class MilestoneController extends Controller
      */
     public function show(string $id): JsonResponse
     {
-        $milestone = Milestone::with('requirements')->findOrFail($id);
+        $user = auth()->user();
+        $milestone = Milestone::with(['requirements', 'project'])->findOrFail($id);
+        
+        // Validate user has access to the milestone's project
+        if (!$user->canAccessProject($milestone->project)) {
+            abort(403, 'Access denied: You do not have permission to view this milestone.');
+        }
         
         return response()->json(['milestone' => $milestone]);
     }
@@ -72,7 +103,14 @@ class MilestoneController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
+        $user = auth()->user();
         $milestone = Milestone::findOrFail($id);
+        
+        // Validate user has access to the milestone's project
+        $project = Project::findOrFail($milestone->project_id);
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to update this milestone.');
+        }
         
         $validated = $request->validate([
             'title' => 'sometimes|required|string|max:255',
@@ -102,7 +140,15 @@ class MilestoneController extends Controller
      */
     public function destroy(string $id): JsonResponse
     {
+        $user = auth()->user();
         $milestone = Milestone::findOrFail($id);
+        
+        // Validate user has access to the milestone's project
+        $project = Project::findOrFail($milestone->project_id);
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to delete this milestone.');
+        }
+        
         $milestone->delete();
         
         return response()->json(['message' => 'Milestone deleted successfully']);
@@ -113,7 +159,14 @@ class MilestoneController extends Controller
      */
     public function updateStatus(Request $request, string $id): JsonResponse
     {
+        $user = auth()->user();
         $milestone = Milestone::findOrFail($id);
+        
+        // Validate user has access to the milestone's project
+        $project = Project::findOrFail($milestone->project_id);
+        if (!$user->canAccessProject($project)) {
+            abort(403, 'Access denied: You do not have permission to update this milestone.');
+        }
         
         $validated = $request->validate([
             'status' => 'required|in:Pending,Complete,Overdue'
@@ -129,11 +182,23 @@ class MilestoneController extends Controller
      */
     public function updateOrder(Request $request): JsonResponse
     {
+        $user = auth()->user();
+        
         $validated = $request->validate([
             'milestones' => 'required|array',
             'milestones.*.id' => 'required|exists:milestones,id',
             'milestones.*.due_date' => 'nullable|date'
         ]);
+        
+        // Verify user has access to all milestones being reordered
+        $milestoneIds = array_column($validated['milestones'], 'id');
+        $milestones = Milestone::whereIn('id', $milestoneIds)->with('project')->get();
+        
+        foreach ($milestones as $milestone) {
+            if (!$user->canAccessProject($milestone->project)) {
+                abort(403, 'Access denied: You do not have permission to reorder these milestones.');
+            }
+        }
         
         foreach ($validated['milestones'] as $item) {
             Milestone::where('id', $item['id'])->update(['due_date' => $item['due_date']]);

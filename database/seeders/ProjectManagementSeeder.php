@@ -43,7 +43,7 @@ class ProjectManagementSeeder extends Seeder
 
         // Create Users for each firm
         $users = [];
-        $roles = ['Admin', 'BD', 'Consultant', 'JV Partner User'];
+        $roles = ['admin', 'business_development', 'consultant', 'jv_partner'];
         
         foreach ($firms as $firm) {
             for ($i = 0; $i < rand(2, 5); $i++) {

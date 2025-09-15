@@ -225,6 +225,20 @@ export const documentColumns: ColumnConfig<any>[] = [
 export const userColumns: ColumnConfig<any>[] = [
     { accessorKey: 'name', header: 'Name', sortable: true, filterable: true },
     { accessorKey: 'email', header: 'Email', type: 'email', sortable: true, filterable: true },
+    { 
+        accessorKey: 'role', 
+        header: 'Role', 
+        type: 'badge',
+        sortable: true, 
+        filterable: true,
+        format: (value: string) => {
+            const roleLabels: Record<string, string> = {
+                'superadmin': 'Super Admin',
+                'user': 'User'
+            };
+            return roleLabels[value] || value;
+        }
+    },
     { accessorKey: 'firm.name', header: 'Firm', sortable: true, filterable: true },
     { accessorKey: 'created_at', header: 'Created', type: 'date', sortable: true },
 ];

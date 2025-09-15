@@ -22,6 +22,7 @@ interface User {
     password_confirmation?: string;
     firm_id: number | null;
     phone?: string;
+    role?: string;
     created_at?: string;
     updated_at?: string;
     firm?: any;
@@ -49,6 +50,7 @@ export default function UserForm({ user, firms = [] }: Props) {
         password: '',
         password_confirmation: '',
         firm_id: user?.firm_id || '',
+        role: user?.role || 'user',
     });
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -246,6 +248,42 @@ export default function UserForm({ user, firms = [] }: Props) {
                                 </div>
                             </div>
                         </div>
+                        
+                        {/* Role Management Section - Only visible to superadmins */}
+                        {auth.user?.role === 'superadmin' && (
+                            <>
+                                <Separator />
+                                
+                                <div>
+                                    <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+                                        <Shield className="h-4 w-4" />
+                                        Role & Permissions
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <Label className="text-xs">User Role *</Label>
+                                            <Select
+                                                value={data.role}
+                                                onValueChange={(value) => setData('role', value)}
+                                            >
+                                                <SelectTrigger className="h-8 text-sm">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="superadmin">Super Administrator</SelectItem>
+                                                    <SelectItem value="user">User</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            {errors.role && <p className="text-red-500 text-xs mt-1">{errors.role}</p>}
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                {data.role === 'superadmin' && 'Full system access - can manage all users and firms'}
+                                                {data.role === 'user' && 'Regular user with standard access'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </CardContent>
                 </Card>
             </form>

@@ -4,6 +4,9 @@ use App\Http\Middleware\FirmAccessMiddleware;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SuperadminMiddleware;
+use App\Http\Middleware\TenantIsolationMiddleware;
+use App\Http\Middleware\RequirePermission;
+use App\Http\Middleware\RequireRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -27,6 +30,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'firm.access' => FirmAccessMiddleware::class,
             'superadmin' => SuperadminMiddleware::class,
+            'tenant.isolation' => TenantIsolationMiddleware::class,
+            'permission' => RequirePermission::class,
+            'role' => RequireRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

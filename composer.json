@@ -83,7 +83,9 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
-        }
+        },
+        "apcu-autoloader": true,
+        "classmap-authoritative": true
     },
     "minimum-stability": "stable",
     "prefer-stable": true

@@ -7,6 +7,8 @@ use App\Models\Project;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class TaskController extends Controller
 {
@@ -16,14 +18,21 @@ class TaskController extends Controller
     public function index(Request $request)
     {
         $projectId = $request->get('project_id');
+        $cacheKey = "tasks_index_{$projectId}";
         
-        $query = Task::with(['assignedUser', 'assignedFirm']);
-        
-        if ($projectId) {
-            $query->where('project_id', $projectId);
-        }
-        
-        $tasks = $query->orderBy('created_at', 'desc')->get();
+        $tasks = Cache::remember($cacheKey, 300, function() use ($projectId) {
+            $query = Task::with([
+                'assignedUser:id,name,email',
+                'assignedFirm:id,name'
+            ])
+            ->select('id', 'project_id', 'title', 'description', 'status', 'priority', 'due_date', 'assigned_user_id', 'assigned_firm_id', 'created_at', 'updated_at');
+            
+            if ($projectId) {
+                $query->where('project_id', $projectId);
+            }
+            
+            return $query->orderBy('created_at', 'desc')->get();
+        });
         
         return response()->json($tasks);
     }
@@ -57,8 +66,18 @@ class TaskController extends Controller
             $validated['assigned_user_id'] = Auth::id();
         }
         
-        $task = Task::create($validated);
-        $task->load(['assignedUser', 'assignedFirm']);
+        $task = DB::transaction(function() use ($validated, $request) {
+            $task = Task::create($validated);
+            $task->load([
+                'assignedUser:id,name,email',
+                'assignedFirm:id,name'
+            ]);
+            
+            // Clear cache
+            Cache::forget("tasks_index_{$validated['project_id']}");
+            
+            return $task;
+        });
         
         return response()->json($task, 201);
     }
@@ -68,8 +87,18 @@ class TaskController extends Controller
      */
     public function show(string $id)
     {
-        $task = Task::with(['assignedUser', 'assignedFirm', 'subtasks', 'documents'])
+        $cacheKey = "task_show_{$id}";
+        
+        $task = Cache::remember($cacheKey, 300, function() use ($id) {
+            return Task::with([
+                'assignedUser:id,name,email',
+                'assignedFirm:id,name',
+                'subtasks:id,parent_task_id,title,status,priority,due_date',
+                'documents:id,task_id,name,category,created_at'
+            ])
+            ->select('id', 'project_id', 'title', 'description', 'status', 'priority', 'due_date', 'assigned_user_id', 'assigned_firm_id', 'parent_task_id', 'created_at', 'updated_at')
             ->findOrFail($id);
+        });
         
         return response()->json($task);
     }
@@ -101,8 +130,18 @@ class TaskController extends Controller
             'priority' => 'nullable|in:Low,Medium,High,Critical',
         ]);
         
-        $task->update($validated);
-        $task->load(['assignedUser', 'assignedFirm']);
+        DB::transaction(function() use ($task, $validated) {
+            $task->update($validated);
+            
+            // Clear relevant caches
+            Cache::forget("task_show_{$task->id}");
+            Cache::forget("tasks_index_{$task->project_id}");
+        });
+        
+        $task->load([
+            'assignedUser:id,name,email',
+            'assignedFirm:id,name'
+        ]);
         
         return response()->json($task);
     }
@@ -113,7 +152,15 @@ class TaskController extends Controller
     public function destroy(string $id)
     {
         $task = Task::findOrFail($id);
-        $task->delete();
+        $projectId = $task->project_id;
+        
+        DB::transaction(function() use ($task, $projectId) {
+            $task->delete();
+            
+            // Clear caches
+            Cache::forget("task_show_{$task->id}");
+            Cache::forget("tasks_index_{$projectId}");
+        });
         
         return response()->json(['message' => 'Task deleted successfully']);
     }
@@ -129,8 +176,18 @@ class TaskController extends Controller
             'status' => 'required|in:Todo,In Progress,Done',
         ]);
         
-        $task->update(['status' => $validated['status']]);
-        $task->load(['assignedUser', 'assignedFirm']);
+        DB::transaction(function() use ($task, $validated) {
+            $task->update(['status' => $validated['status']]);
+            
+            // Clear caches
+            Cache::forget("task_show_{$task->id}");
+            Cache::forget("tasks_index_{$task->project_id}");
+        });
+        
+        $task->load([
+            'assignedUser:id,name,email',
+            'assignedFirm:id,name'
+        ]);
         
         return response()->json($task);
     }
@@ -147,11 +204,30 @@ class TaskController extends Controller
             'tasks.*.order' => 'nullable|integer',
         ]);
         
-        foreach ($validated['tasks'] as $taskData) {
-            Task::where('id', $taskData['id'])->update([
-                'status' => $taskData['status'],
-            ]);
+        // Verify user has access to all tasks being reordered
+        $taskIds = array_column($validated['tasks'], 'id');
+        $tasks = Task::whereIn('id', $taskIds)->with('project')->get();
+        
+        foreach ($tasks as $task) {
+            if (!$user->canAccessProject($task->project)) {
+                abort(403, 'Access denied: You do not have permission to reorder these tasks.');
+            }
         }
+        
+        DB::transaction(function() use ($validated, $tasks) {
+            // Batch update all tasks
+            foreach ($validated['tasks'] as $taskData) {
+                Task::where('id', $taskData['id'])->update([
+                    'status' => $taskData['status'],
+                ]);
+            }
+            
+            // Clear caches for affected projects
+            $projectIds = $tasks->pluck('project_id')->unique();
+            foreach ($projectIds as $projectId) {
+                Cache::forget("tasks_index_{$projectId}");
+            }
+        });
         
         return response()->json(['message' => 'Tasks updated successfully']);
     }

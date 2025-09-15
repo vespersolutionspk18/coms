@@ -8,7 +8,7 @@ interface User {
     id: number;
     name: string;
     email: string;
-    role: 'Admin' | 'Manager' | 'User';
+    role: 'superadmin' | 'user';
     firm_id: number | null;
     status: 'Active' | 'Inactive';
     notification_preferences: any;
