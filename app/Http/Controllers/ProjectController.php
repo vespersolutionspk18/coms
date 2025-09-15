@@ -104,10 +104,10 @@ class ProjectController extends Controller
             'client_email' => 'nullable|email|max:255',
             'client_phone' => 'nullable|string|max:50',
             'documents_procurement' => 'nullable|string',
-            'stage' => 'required|in:Identification,Pre-Bid,Proposal,Award,Implementation',
+            'stage' => 'nullable|string',
             'submission_date' => 'nullable|date',
             'bid_security' => 'nullable|string',
-            'status' => 'required|in:Active,Closed,On Hold',
+            'status' => 'nullable|string',
             'pre_bid_expected_date' => 'nullable|date',
             'advertisement' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,pdf,doc,docx', // No size limit
             'firms' => 'nullable|array',
@@ -126,6 +126,14 @@ class ProjectController extends Controller
         $firms = $validated['firms'] ?? [];
         $requirements = $validated['requirements'] ?? [];
         unset($validated['firms'], $validated['requirements']);
+        
+        // Set default values for stage and status if not provided
+        if (empty($validated['stage'])) {
+            $validated['stage'] = 'Identification';
+        }
+        if (empty($validated['status'])) {
+            $validated['status'] = 'Active';
+        }
 
         // Handle advertisement image upload using default disk (S3)
         if ($request->hasFile('advertisement')) {
@@ -338,17 +346,17 @@ class ProjectController extends Controller
         }
 
         $validated = $request->validate([
-            'title' => 'sometimes|required|string|max:255',
+            'title' => 'required|string|max:255',
             'sector' => 'nullable|string',
             'scope_of_work' => 'nullable|array',
             'client' => 'nullable|string',
             'client_email' => 'nullable|email|max:255',
             'client_phone' => 'nullable|string|max:50',
             'documents_procurement' => 'nullable|string',
-            'stage' => 'sometimes|required|in:Identification,Pre-Bid,Proposal,Award,Implementation',
+            'stage' => 'nullable|string',
             'submission_date' => 'nullable|date',
             'bid_security' => 'nullable|string',
-            'status' => 'sometimes|required|in:Active,Closed,On Hold',
+            'status' => 'nullable|string',
             'pre_bid_expected_date' => 'nullable|date',
             'advertisement' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,pdf,doc,docx', // No size limit
             'remove_advertisement' => 'sometimes|boolean',
@@ -370,6 +378,14 @@ class ProjectController extends Controller
         $requirements = $validated['requirements'] ?? null;
         $removeAdvertisement = $validated['remove_advertisement'] ?? false;
         unset($validated['firms'], $validated['requirements'], $validated['remove_advertisement']);
+        
+        // Set default values for stage and status if not provided
+        if (isset($validated['stage']) && empty($validated['stage'])) {
+            $validated['stage'] = 'Identification';
+        }
+        if (isset($validated['status']) && empty($validated['status'])) {
+            $validated['status'] = 'Active';
+        }
 
         // Handle advertisement image update using default disk (S3)
         if ($request->hasFile('advertisement')) {

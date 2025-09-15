@@ -81,17 +81,8 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             });
         }
     }, [project]); // Watch for project changes
-    // Preserve tab state using URL hash or localStorage
-    const [activeTab, setActiveTab] = useState(() => {
-        // Check URL hash first
-        const hash = window.location.hash.replace('#', '');
-        if (['overview', 'documents', 'requirements', 'tasks', 'firms', 'milestones'].includes(hash)) {
-            return hash;
-        }
-        // Otherwise check localStorage
-        const saved = localStorage.getItem('projectFormActiveTab');
-        return saved || 'overview';
-    });
+    // Always start with overview tab when loading the form
+    const [activeTab, setActiveTab] = useState('overview');
     const [taskView, setTaskView] = useState<'kanban' | 'list'>('kanban');
     const [documents, setDocuments] = useState<any[]>([]);
     const [loadingDocuments, setLoadingDocuments] = useState(false);
@@ -218,10 +209,10 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         client_email: project?.client_email || '',
         client_phone: project?.client_phone || '',
         documents_procurement: project?.documents_procurement || '',
-        stage: project?.stage || 'Identification',
+        stage: project?.stage || '',
         submission_date: formatDateForInput(project?.submission_date),
         bid_security: project?.bid_security || '',
-        status: project?.status || 'Active',
+        status: project?.status || '',
         pre_bid_expected_date: formatDateForInput(project?.pre_bid_expected_date),
         firms: Array.isArray(project?.firms) ? project.firms.map(firm => ({
             ...firm,
@@ -782,13 +773,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             
             <form id="project-form" onSubmit={handleSubmit} className="space-y-1 p-2">
 
-                <Tabs value={activeTab} onValueChange={(value) => {
-                    setActiveTab(value);
-                    // Save to localStorage
-                    localStorage.setItem('projectFormActiveTab', value);
-                    // Update URL hash without causing navigation
-                    window.history.replaceState(null, '', `#${value}`);
-                }} className="w-full">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <TabsList className="grid w-full grid-cols-6">
                         <TabsTrigger value="overview">Overview</TabsTrigger>
                         <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -967,7 +952,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                     <input
                                                         ref={advertisementInputRef}
                                                         type="file"
-                                                        accept="image/*,.pdf,.doc,.docx"
+                                                        accept=".jpeg,.jpg,.png,.gif,.svg,.pdf,.doc,.docx,image/jpeg,image/png,image/gif,image/svg+xml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                                         onChange={handleAdvertisementSelect}
                                                         className="hidden"
                                                     />
