@@ -82,7 +82,7 @@ class OverviewGenerationService
                 properties: [
                     'title' => new Schema(
                         type: DataType::STRING,
-                        description: 'Project title or tender name'
+                        description: 'EXACT project title or tender name as it appears in the document - do not paraphrase or modify'
                     ),
                     'client' => new Schema(
                         type: DataType::STRING,
@@ -136,7 +136,7 @@ class OverviewGenerationService
             // Prepare the prompt
             $prompt = "You are a professional tender document analyst. Analyze this tender advertisement image and extract the following information:
 
-1. Project Title: The main title or name of the tender/project
+1. Project Title: Extract the EXACT title as it appears in the document. This is typically found at the top of the first page, as a main heading, or in a title section. DO NOT paraphrase, rephrase, summarize, or interpret the title. Copy it word-for-word exactly as written, preserving the exact wording, punctuation, capitalization, and format. If there are multiple title-like headings, choose the most prominent one from the first page.
 2. Client: The organization or entity issuing the tender
 3. Client Email: Extract any email addresses mentioned for the client or procurement contact (return null if not found)
 4. Client Phone: Extract any phone numbers mentioned for the client or procurement contact (return null if not found)
@@ -148,6 +148,8 @@ class OverviewGenerationService
 10. Pre-bid Date: The pre-bid meeting date if mentioned (format as YYYY-MM-DD, return null if not found)
 11. Status: Determine if the tender is 'Active' (submission date in future), 'Closed' (submission date passed), or 'On Hold'
 12. Stage: Based on the dates and information, determine the stage: 'Identification' (just announced), 'Pre-Bid' (pre-bid meeting upcoming), 'Proposal' (preparing proposal), 'Award' (winner selected), or 'Implementation' (work in progress)
+
+CRITICAL: The Project Title must be extracted character-by-character EXACTLY as it appears in the document. Do NOT create your own title or modify the existing one in any way.
 
 Pay special attention to the Documents Procurement field - this should contain HTML-formatted information about WHERE to get the tender documents, not what documents are required. Look for URLs (convert to clickable links), addresses (bold them), contact information (format nicely), or procurement portal references. Use proper HTML formatting to make the information clear and actionable.
 
@@ -330,7 +332,7 @@ Extract as much relevant information as possible from the image. If certain info
                 properties: [
                     'title' => new Schema(
                         type: DataType::STRING,
-                        description: 'Project title or tender name'
+                        description: 'EXACT project title or tender name as it appears in the document - do not paraphrase or modify'
                     ),
                     'client' => new Schema(
                         type: DataType::STRING,
@@ -384,7 +386,7 @@ Extract as much relevant information as possible from the image. If certain info
             // Prepare the prompt for text analysis
             $prompt = "You are a professional tender document analyst. Analyze this tender advertisement text and extract the following information:
 
-1. Project Title: The main title or name of the tender/project
+1. Project Title: Extract the EXACT title as it appears in the document. This is typically found at the top of the first page, as a main heading, or in a title section. DO NOT paraphrase, rephrase, summarize, or interpret the title. Copy it word-for-word exactly as written, preserving the exact wording, punctuation, capitalization, and format. If there are multiple title-like headings, choose the most prominent one from the first page.
 2. Client: The organization or entity issuing the tender
 3. Client Email: Extract any email addresses mentioned for the client or procurement contact (return null if not found)
 4. Client Phone: Extract any phone numbers mentioned for the client or procurement contact (return null if not found)
@@ -396,6 +398,8 @@ Extract as much relevant information as possible from the image. If certain info
 10. Pre-bid Date: The pre-bid meeting date if mentioned (format as YYYY-MM-DD, return null if not found)
 11. Status: Determine if the tender is 'Active' (submission date in future), 'Closed' (submission date passed), or 'On Hold'
 12. Stage: Based on the dates and information, determine the stage: 'Identification' (just announced), 'Pre-Bid' (pre-bid meeting upcoming), 'Proposal' (preparing proposal), 'Award' (winner selected), or 'Implementation' (work in progress)
+
+CRITICAL: The Project Title must be extracted character-by-character EXACTLY as it appears in the document. Do NOT create your own title or modify the existing one in any way.
 
 Pay special attention to the Documents Procurement field - this should contain HTML-formatted information about WHERE to get the tender documents, not what documents are required. Look for URLs (convert to clickable links), addresses (bold them), contact information (format nicely), or procurement portal references. Use proper HTML formatting to make the information clear and actionable.
 
