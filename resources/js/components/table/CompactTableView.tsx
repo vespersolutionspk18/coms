@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { router } from '@inertiajs/react';
 import {
     useReactTable,
@@ -68,6 +68,7 @@ interface TableViewProps<TData> {
     defaultPageSize?: number;
     onRowClick?: (row: TData) => void;
     rowClickRoute?: string;
+    onRowSelectionChange?: (selectedRows: TData[]) => void;
 }
 
 export function CompactTableView<TData extends Record<string, any>>({
@@ -82,6 +83,7 @@ export function CompactTableView<TData extends Record<string, any>>({
     defaultPageSize = 50,
     onRowClick,
     rowClickRoute,
+    onRowSelectionChange,
 }: TableViewProps<TData>) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -159,6 +161,14 @@ export function CompactTableView<TData extends Record<string, any>>({
     });
 
     const selectedCount = Object.keys(rowSelection).length;
+
+    // Notify parent component of selection changes
+    useEffect(() => {
+        if (onRowSelectionChange) {
+            const selectedRows = table.getSelectedRowModel().rows.map(row => row.original);
+            onRowSelectionChange(selectedRows);
+        }
+    }, [rowSelection, onRowSelectionChange]);
 
     return (
         <div className="w-full px-4">

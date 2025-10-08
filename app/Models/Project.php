@@ -5,10 +5,105 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use App\Traits\BelongsToTenant;
+use Illuminate\Support\Facades\Storage;
 
 class Project extends Model
 {
     use HasFactory, BelongsToTenant;
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::deleting(function ($project) {
+            // Delete advertisement image file
+            if ($project->advertisement && Storage::exists($project->advertisement)) {
+                Storage::delete($project->advertisement);
+            }
+
+            // Get IDs of all related entities that will be cascade deleted
+            $requirementIds = $project->requirements()->pluck('id')->toArray();
+            $taskIds = $project->tasks()->pluck('id')->toArray();
+
+            // Get ALL documents that will be cascade deleted:
+            // 1. Documents linked to project directly
+            // 2. Documents linked to requirements
+            // 3. Documents linked to tasks
+            $documentQuery = Document::where('project_id', $project->id);
+
+            if (!empty($requirementIds)) {
+                $documentQuery->orWhereIn('requirement_id', $requirementIds);
+            }
+
+            if (!empty($taskIds)) {
+                $documentQuery->orWhereIn('task_id', $taskIds);
+            }
+
+            $documentIds = $documentQuery->pluck('id')->toArray();
+
+            // Delete all document files from storage (must happen before cascade delete)
+            $documentsToDelete = Document::whereIn('id', $documentIds)->get();
+            foreach ($documentsToDelete as $document) {
+                if ($document->file_path && Storage::exists($document->file_path)) {
+                    Storage::delete($document->file_path);
+                }
+            }
+
+            // Delete comments for project and all related entities (polymorphic, no FK cascade)
+            Comment::where('related_to_type', 'Project')
+                   ->where('related_to_id', $project->id)
+                   ->delete();
+
+            if (!empty($requirementIds)) {
+                Comment::where('related_to_type', 'Requirement')
+                       ->whereIn('related_to_id', $requirementIds)
+                       ->delete();
+            }
+
+            if (!empty($taskIds)) {
+                Comment::where('related_to_type', 'Task')
+                       ->whereIn('related_to_id', $taskIds)
+                       ->delete();
+            }
+
+            if (!empty($documentIds)) {
+                Comment::where('related_to_type', 'Document')
+                       ->whereIn('related_to_id', $documentIds)
+                       ->delete();
+            }
+
+            // Delete AI metadata for project and all related entities (polymorphic, no FK cascade)
+            AiMetadata::where('entity_type', 'Project')
+                      ->where('entity_id', $project->id)
+                      ->delete();
+
+            if (!empty($requirementIds)) {
+                AiMetadata::where('entity_type', 'Requirement')
+                          ->whereIn('entity_id', $requirementIds)
+                          ->delete();
+            }
+
+            if (!empty($taskIds)) {
+                AiMetadata::where('entity_type', 'Task')
+                          ->whereIn('entity_id', $taskIds)
+                          ->delete();
+            }
+
+            if (!empty($documentIds)) {
+                AiMetadata::where('entity_type', 'Document')
+                          ->whereIn('entity_id', $documentIds)
+                          ->delete();
+            }
+
+            // Everything else will cascade delete at database level:
+            // - documents (with FK cascade)
+            // - requirements (with FK cascade)
+            // - tasks (with FK cascade)
+            // - milestones (with FK cascade)
+            // - notifications (with FK cascade)
+            // - project_firms (with FK cascade, unlinking firms)
+        });
+    }
 
     protected $fillable = [
         'title',

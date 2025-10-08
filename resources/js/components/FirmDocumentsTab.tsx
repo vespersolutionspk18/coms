@@ -220,7 +220,7 @@ const FirmDocumentsTab = forwardRef<FirmDocumentsTabRef, FirmDocumentsTabProps>(
                         <div className="flex flex-col items-center justify-center py-8">
                             <Upload className="h-12 w-12 text-gray-400 mb-3" />
                             <p className="text-sm text-gray-600 mb-2">Click to upload or drag and drop</p>
-                            <p className="text-xs text-gray-500">PDF, DOC, DOCX, TXT, Images, Excel, CSV (MAX. 10MB)</p>
+                            <p className="text-xs text-gray-500">PDF, DOC, DOCX, TXT, Images, Excel, CSV (MAX. 500MB)</p>
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -238,10 +238,12 @@ const FirmDocumentsTab = forwardRef<FirmDocumentsTabRef, FirmDocumentsTabProps>(
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <div className="flex items-center space-x-3 text-sm text-gray-600">
-                                <FileText className="h-5 w-5" />
-                                <span className="font-medium">{selectedFile.name}</span>
-                                <span className="text-gray-400">({(selectedFile.size / 1024).toFixed(2)} KB)</span>
+                            <div className="flex items-start space-x-3 text-sm text-gray-600">
+                                <FileText className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                    <span className="font-medium break-words block">{selectedFile.name}</span>
+                                    <span className="text-gray-400 text-xs">({(selectedFile.size / 1024).toFixed(2)} KB)</span>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">

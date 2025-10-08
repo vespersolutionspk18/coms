@@ -157,8 +157,8 @@ return [
             'persistent' => env('REDIS_PERSISTENT', true),
             'persistent_id' => env('REDIS_PERSISTENT_ID', 'laravel_persistent'),
             'read_timeout' => env('REDIS_READ_TIMEOUT', 60),
-            'serializer' => \Redis::SERIALIZER_IGBINARY,
-            'compression' => \Redis::COMPRESSION_LZF,
+            'serializer' => defined('Redis::SERIALIZER_IGBINARY') ? \Redis::SERIALIZER_IGBINARY : \Redis::SERIALIZER_PHP,
+            'compression' => defined('Redis::COMPRESSION_LZF') ? \Redis::COMPRESSION_LZF : \Redis::COMPRESSION_NONE,
             'scan' => \Redis::SCAN_RETRY,
         ],
 

@@ -134,8 +134,8 @@ class User extends Authenticatable
         if ($this->isSuperadmin()) {
             return true;
         }
-        
-        return $project->firms()->where('firm_id', $this->firm_id)->exists();
+
+        return $project->firms()->where('firms.id', $this->firm_id)->exists();
     }
 
     public function canManageUser($user)

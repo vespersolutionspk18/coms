@@ -74,8 +74,9 @@ class DocumentController extends Controller
         $user = auth()->user();
         
         $validated = $request->validate([
-            'file' => 'required|file|mimes:pdf,doc,docx', // No size limit
+            'file' => 'required|file|mimes:pdf,doc,docx|max:512000', // 500MB max
             'name' => 'nullable|string|max:255',
+            'category' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'firm_id' => 'nullable|exists:firms,id',
             'requirement_id' => 'nullable|exists:requirements,id',
@@ -118,6 +119,7 @@ class DocumentController extends Controller
             
             $document = Document::create([
                 'name' => $fileName,
+                'category' => $validated['category'] ?? null,
                 'file_path' => $path,
                 'parsed_text' => $parsedText,
                 'uploaded_by' => auth()->id(),
@@ -194,6 +196,7 @@ class DocumentController extends Controller
         
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
+            'category' => 'nullable|string|max:255',
             'tags' => 'nullable|array',
             'status' => 'sometimes|in:Pending Review,Approved,Rejected,AI-Reviewed',
             'project_id' => 'nullable|exists:projects,id',
@@ -212,7 +215,7 @@ class DocumentController extends Controller
         // If a new file is uploaded, create a new version
         if ($request->hasFile('file')) {
             $request->validate([
-                'file' => 'file|mimes:pdf,doc,docx',
+                'file' => 'file|mimes:pdf,doc,docx|max:512000', // 500MB max
             ]);
 
             $file = $request->file('file');
@@ -333,7 +336,7 @@ class DocumentController extends Controller
         }
         
         $validated = $request->validate([
-            'file' => 'required|file|mimes:pdf,doc,docx,txt,png,jpg,jpeg,gif,xlsx,xls,csv',
+            'file' => 'required|file|mimes:pdf,doc,docx,txt,png,jpg,jpeg,gif,xlsx,xls,csv|max:512000', // 500MB max
             'name' => 'required|string|max:255',
             'category' => 'nullable|string|max:255',
         ]);

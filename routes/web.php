@@ -59,6 +59,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     
     // Projects - all operations require tenant isolation
     Route::resource('projects', ProjectController::class)->middleware('tenant.isolation');
+    Route::post('projects/bulk-destroy', [ProjectController::class, 'bulkDestroy'])->name('projects.bulk-destroy')->middleware('tenant.isolation');
     
     // Requirements - all operations require tenant isolation
     Route::resource('requirements', RequirementController::class)->middleware('tenant.isolation');

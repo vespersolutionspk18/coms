@@ -533,25 +533,79 @@ class ProjectController extends Controller
     public function destroy(Project $project)
     {
         $user = auth()->user();
-        
+
         // Check if user can access this project
         if (!$user->canAccessProject($project)) {
             abort(403, 'Access denied: You do not have permission to delete this project.');
         }
-        
-        // Delete advertisement image if exists
-        if ($project->advertisement && Storage::exists($project->advertisement)) {
-            Storage::delete($project->advertisement);
-        }
-        
-        // Use transaction for delete
+
+        // Use transaction for delete (cascade delete handled in Project model boot method)
         DB::transaction(function() use ($project) {
             $project->delete();
         });
-        
+
         // Clear caches
         Cache::forget("projects_index_{$user->id}_{$user->firm_id}_1");
-        
+
         return redirect()->route('projects.index');
+    }
+
+    /**
+     * Remove multiple projects from storage.
+     */
+    public function bulkDestroy(Request $request)
+    {
+        $user = auth()->user();
+
+        // Validate the request
+        $validated = $request->validate([
+            'ids' => 'required|array',
+            'ids.*' => 'integer|exists:projects,id'
+        ]);
+
+        $ids = $validated['ids'];
+
+        if (empty($ids)) {
+            return back()->with('error', 'No projects selected for deletion.');
+        }
+
+        // Get projects that user has access to
+        $projects = Project::whereIn('id', $ids)->get();
+
+        // Check permissions for each project
+        $deletableProjects = [];
+        $skippedCount = 0;
+
+        foreach ($projects as $project) {
+            if ($user->canAccessProject($project)) {
+                $deletableProjects[] = $project->id;
+            } else {
+                $skippedCount++;
+            }
+        }
+
+        if (empty($deletableProjects)) {
+            return back()->with('error', 'You do not have permission to delete any of the selected projects.');
+        }
+
+        // Delete projects in a transaction
+        DB::transaction(function() use ($deletableProjects) {
+            Project::whereIn('id', $deletableProjects)->delete();
+        });
+
+        // Clear caches
+        Cache::forget("projects_index_{$user->id}_{$user->firm_id}_1");
+
+        // Prepare success message
+        $deletedCount = count($deletableProjects);
+        $message = $deletedCount === 1
+            ? '1 project deleted successfully.'
+            : "{$deletedCount} projects deleted successfully.";
+
+        if ($skippedCount > 0) {
+            $message .= " {$skippedCount} project(s) were skipped due to insufficient permissions.";
+        }
+
+        return back()->with('success', $message);
     }
 }

@@ -16,21 +16,25 @@ trait BelongsToTenant
         // Add global scope to automatically filter by tenant
         static::addGlobalScope('tenant', function (Builder $builder) {
             $user = auth()->user();
-            
+
             if (!$user) {
                 // No user, no results (for safety)
                 $builder->whereRaw('1 = 0');
                 return;
             }
-            
-            // Superadmins see everything
-            if ($user->isSuperadmin()) {
+
+            // Superadmins see everything - check role attribute directly and with method
+            if (isset($user->role) && $user->role === 'superadmin') {
                 return;
             }
-            
+
+            if (method_exists($user, 'isSuperadmin') && $user->isSuperadmin()) {
+                return;
+            }
+
             // Apply tenant filtering based on the model
             $model = $builder->getModel();
-            
+
             if ($model instanceof User) {
                 // Users can only see users from their firm
                 $builder->where('firm_id', $user->firm_id);

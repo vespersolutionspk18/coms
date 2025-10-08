@@ -91,7 +91,12 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
     const [showUploadDialog, setShowUploadDialog] = useState(false);
     const [uploadFile, setUploadFile] = useState<File | null>(null);
     const [uploadRequirementId, setUploadRequirementId] = useState<string>('');
+    const [uploadCategory, setUploadCategory] = useState<string>('');
     const [editingDocumentId, setEditingDocumentId] = useState<number | null>(null);
+    const [editingCategoryDocId, setEditingCategoryDocId] = useState<number | null>(null);
+    const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+    const [newDocCategory, setNewDocCategory] = useState('');
+    const [documentCategories, setDocumentCategories] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const advertisementInputRef = useRef<HTMLInputElement>(null);
     const [advertisementFile, setAdvertisementFile] = useState<File | null>(null);
@@ -123,6 +128,16 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
         }
     }, [project?.id, activeTab]);
 
+    // Auto-search with debouncing
+    useEffect(() => {
+        if (project?.id && activeTab === 'documents') {
+            const timer = setTimeout(() => {
+                fetchDocuments();
+            }, 300); // 300ms debounce
+            return () => clearTimeout(timer);
+        }
+    }, [documentSearch]);
+
     // Set initial advertisement preview if project has one
     useEffect(() => {
         if (project?.advertisement) {
@@ -146,6 +161,18 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                 newSet.delete(type);
             } else {
                 newSet.add(type);
+            }
+            return newSet;
+        });
+    };
+
+    const toggleCategoryCollapse = (category: string) => {
+        setCollapsedCategories(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(category)) {
+                newSet.delete(category);
+            } else {
+                newSet.add(category);
             }
             return newSet;
         });
@@ -439,7 +466,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
 
     const fetchDocuments = async () => {
         if (!project?.id) return;
-        
+
         setLoadingDocuments(true);
         try {
             const response = await axios.get(`/documents`, {
@@ -448,7 +475,15 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                     search: documentSearch
                 }
             });
-            setDocuments(response.data.data || []);
+            const fetchedDocs = response.data.data || [];
+            setDocuments(fetchedDocs);
+
+            // Extract unique categories from documents and merge with existing manual categories
+            const extractedCategories = [...new Set(fetchedDocs.map((doc: any) => doc.category).filter(Boolean))];
+            setDocumentCategories(prev => {
+                const merged = [...new Set([...prev, ...extractedCategories])];
+                return merged;
+            });
         } catch (error) {
             console.error('Error fetching documents:', error);
         } finally {
@@ -477,13 +512,16 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             return;
         }
 
-        console.log('Starting document upload:', { fileName: uploadFile.name, projectId: project.id, requirementId: uploadRequirementId });
+        console.log('Starting document upload:', { fileName: uploadFile.name, projectId: project.id, requirementId: uploadRequirementId, category: uploadCategory });
         setUploadingDocument(true);
         const formData = new FormData();
         formData.append('file', uploadFile);
         formData.append('project_id', project.id.toString());
         if (uploadRequirementId) {
             formData.append('requirement_id', uploadRequirementId);
+        }
+        if (uploadCategory) {
+            formData.append('category', uploadCategory);
         }
 
         try {
@@ -497,13 +535,19 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             
             // Add new document to list
             setDocuments(prev => [response.data.document, ...prev]);
-            
+
+            // Add category to list if it's new
+            if (response.data.document.category && !documentCategories.includes(response.data.document.category)) {
+                setDocumentCategories(prev => [...prev, response.data.document.category]);
+            }
+
             // Clear file input and close dialog
             if (fileInputRef.current) {
                 fileInputRef.current.value = '';
             }
             setUploadFile(null);
             setUploadRequirementId('');
+            setUploadCategory('');
             setShowUploadDialog(false);
         } catch (error: any) {
             console.error('Error uploading document:', error);
@@ -557,16 +601,39 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
             const response = await axios.patch(`/documents/${documentId}`, {
                 requirement_id: requirementId || null
             });
-            
+
             // Update document in list
-            setDocuments(prev => prev.map(doc => 
+            setDocuments(prev => prev.map(doc =>
                 doc.id === documentId ? { ...doc, requirement: response.data.document.requirement } : doc
             ));
-            
+
             setEditingDocumentId(null);
         } catch (error) {
             console.error('Error updating document requirement:', error);
             alert('Failed to update document requirement');
+        }
+    };
+
+    const handleDocumentCategoryUpdate = async (documentId: number, category: string | null) => {
+        try {
+            const response = await axios.patch(`/documents/${documentId}`, {
+                category: category || null
+            });
+
+            // Update document in list
+            setDocuments(prev => prev.map(doc =>
+                doc.id === documentId ? { ...doc, category: response.data.document.category } : doc
+            ));
+
+            // Add category to list if it's new
+            if (category && !documentCategories.includes(category)) {
+                setDocumentCategories(prev => [...prev, category]);
+            }
+
+            setEditingCategoryDocId(null);
+        } catch (error) {
+            console.error('Error updating document category:', error);
+            alert('Failed to update document category');
         }
     };
 
@@ -1281,14 +1348,44 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                     <div className="flex items-center gap-2">
                                         <div className="relative">
                                             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" />
-                                            <Input 
-                                                placeholder="Search..." 
-                                                className="h-6 pl-7 pr-2 text-xs w-32" 
+                                            <Input
+                                                placeholder="Search..."
+                                                className="h-6 pl-7 pr-2 text-xs w-32"
                                                 value={documentSearch}
                                                 onChange={(e) => setDocumentSearch(e.target.value)}
                                                 onKeyPress={(e) => e.key === 'Enter' && fetchDocuments()}
                                             />
                                         </div>
+                                        <Input
+                                            placeholder="Add category..."
+                                            className="h-6 text-xs w-32"
+                                            value={newDocCategory}
+                                            onChange={(e) => setNewDocCategory(e.target.value)}
+                                            onKeyPress={(e) => {
+                                                if (e.key === 'Enter' && newDocCategory.trim()) {
+                                                    e.preventDefault();
+                                                    if (!documentCategories.includes(newDocCategory.trim())) {
+                                                        setDocumentCategories([...documentCategories, newDocCategory.trim()]);
+                                                    }
+                                                    setNewDocCategory('');
+                                                }
+                                            }}
+                                        />
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 px-2"
+                                            onClick={() => {
+                                                if (newDocCategory.trim() && !documentCategories.includes(newDocCategory.trim())) {
+                                                    setDocumentCategories([...documentCategories, newDocCategory.trim()]);
+                                                    setNewDocCategory('');
+                                                }
+                                            }}
+                                            disabled={!newDocCategory.trim()}
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                        </Button>
                                         {project?.id && (
                                             <>
                                                 <input
@@ -1324,6 +1421,58 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                 </div>
                             </CardHeader>
                             <CardContent className="px-2 py-1">
+                                {project?.id && documentCategories.length > 0 && (
+                                    <div className="mb-3 pb-3 border-b">
+                                        <Label className="text-xs font-medium">Available Categories</Label>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {documentCategories.map((cat: string) => {
+                                                const docsWithCategory = documents.filter((d: any) => d.category === cat).length;
+                                                return (
+                                                    <Badge
+                                                        key={cat}
+                                                        variant="secondary"
+                                                        className="text-xs py-0 pr-1 group"
+                                                    >
+                                                        {cat}
+                                                        {docsWithCategory > 0 && (
+                                                            <span className="ml-1 text-gray-500">({docsWithCategory})</span>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={async () => {
+                                                                if (docsWithCategory > 0) {
+                                                                    if (confirm(`${docsWithCategory} document(s) are using "${cat}". Remove this category? Documents will become uncategorized.`)) {
+                                                                        // Remove category from all documents
+                                                                        const docsToUpdate = documents.filter((d: any) => d.category === cat);
+                                                                        try {
+                                                                            await Promise.all(docsToUpdate.map((doc: any) =>
+                                                                                axios.patch(`/documents/${doc.id}`, { category: null })
+                                                                            ));
+                                                                            // Update local state
+                                                                            setDocuments(prev => prev.map(d =>
+                                                                                d.category === cat ? { ...d, category: null } : d
+                                                                            ));
+                                                                            setDocumentCategories(documentCategories.filter(c => c !== cat));
+                                                                        } catch (error) {
+                                                                            console.error('Error removing category:', error);
+                                                                            alert('Failed to remove category from documents');
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    setDocumentCategories(documentCategories.filter(c => c !== cat));
+                                                                }
+                                                            }}
+                                                            className="ml-1 hover:text-red-600 transition-colors"
+                                                            title="Delete category"
+                                                        >
+                                                            <X className="h-2.5 w-2.5" />
+                                                        </button>
+                                                    </Badge>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                                 {!project?.id ? (
                                     <div className="text-center py-8 text-gray-500">
                                         <FileText className="h-8 w-8 mx-auto mb-2 text-gray-300" />
@@ -1335,26 +1484,55 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                         <p className="text-sm mt-2 text-gray-500">Loading documents...</p>
                                     </div>
                                 ) : (
-                                    <div className="border rounded-md overflow-hidden">
-                                        <table className="w-full text-xs">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="text-left px-2 py-1 font-medium">Name</th>
-                                                    <th className="text-left px-2 py-1 font-medium">Requirement</th>
-                                                    <th className="text-left px-2 py-1 font-medium">Uploaded By</th>
-                                                    <th className="text-left px-2 py-1 font-medium">Date</th>
-                                                    <th className="w-20"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {documents.length === 0 ? (
-                                                    <tr>
-                                                        <td colSpan={5} className="text-center py-4 text-gray-500">
-                                                            No documents uploaded yet
-                                                        </td>
-                                                    </tr>
-                                                ) : (
-                                                    documents.filter(doc => doc && doc.id && doc.name).map((doc) => (
+                                    <div className="space-y-1">
+                                        {(() => {
+                                            // Get unique categories from documents
+                                            const uniqueCategories = [...new Set(documents.map((doc: any) => doc.category || 'Uncategorized'))];
+
+                                            if (documents.length === 0) {
+                                                return (
+                                                    <div className="text-center py-8 text-gray-500">
+                                                        <FileText className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                                                        <p className="text-sm">No documents uploaded yet</p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return uniqueCategories.map((category, categoryIndex) => {
+                                                const categoryDocuments = documents.filter((doc: any) => (doc.category || 'Uncategorized') === category);
+
+                                                if (categoryDocuments.length === 0) return null;
+
+                                                return (
+                                                    <div key={category}>
+                                                        <div
+                                                            className="flex items-center gap-2 mb-2 cursor-pointer hover:bg-gray-50 rounded px-2 py-1 -mx-2"
+                                                            onClick={() => toggleCategoryCollapse(category)}
+                                                        >
+                                                            {collapsedCategories.has(category) ? (
+                                                                <ChevronRight className="h-3 w-3 transition-transform" />
+                                                            ) : (
+                                                                <ChevronDown className="h-3 w-3 transition-transform" />
+                                                            )}
+                                                            <FolderOpen className="h-3 w-3" />
+                                                            <span className="text-xs font-medium capitalize">{category}</span>
+                                                            <Badge variant="secondary" className="text-xs py-0">{categoryDocuments.length}</Badge>
+                                                        </div>
+                                                        {!collapsedCategories.has(category) && (
+                                                            <div className="ml-5 border rounded-md overflow-hidden mb-2">
+                                                                <table className="w-full text-xs">
+                                                                    <thead className="bg-gray-50">
+                                                                        <tr>
+                                                                            <th className="text-left px-2 py-1 font-medium">Name</th>
+                                                                            <th className="text-left px-2 py-1 font-medium">Category</th>
+                                                                            <th className="text-left px-2 py-1 font-medium">Requirement</th>
+                                                                            <th className="text-left px-2 py-1 font-medium">Uploaded By</th>
+                                                                            <th className="text-left px-2 py-1 font-medium">Date</th>
+                                                                            <th className="w-20"></th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {categoryDocuments.filter(doc => doc && doc.id && doc.name).map((doc) => (
                                                         <tr 
                                                             key={doc.id} 
                                                             className="border-t hover:bg-gray-50 cursor-pointer"
@@ -1372,6 +1550,63 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                                         {doc?.name || 'Unknown file'}
                                                                     </span>
                                                                 </div>
+                                                            </td>
+                                                            <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                                                                {editingCategoryDocId === doc.id ? (
+                                                                    documentCategories.length > 0 ? (
+                                                                        <Select
+                                                                            value={doc.category || "none"}
+                                                                            onValueChange={(value) => {
+                                                                                const newCategory = value === "none" ? null : value;
+                                                                                handleDocumentCategoryUpdate(doc.id, newCategory);
+                                                                            }}
+                                                                        >
+                                                                            <SelectTrigger className="h-6 text-xs">
+                                                                                <SelectValue />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="none">None</SelectItem>
+                                                                                {documentCategories.map((cat: string) => (
+                                                                                    <SelectItem key={cat} value={cat}>
+                                                                                        {cat}
+                                                                                    </SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    ) : (
+                                                                        <Input
+                                                                            value={doc.category || ''}
+                                                                            onChange={(e) => {
+                                                                                const newCategory = e.target.value;
+                                                                                setDocuments(prev => prev.map(d =>
+                                                                                    d.id === doc.id ? { ...d, category: newCategory } : d
+                                                                                ));
+                                                                            }}
+                                                                            onBlur={() => handleDocumentCategoryUpdate(doc.id, doc.category)}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter') {
+                                                                                    handleDocumentCategoryUpdate(doc.id, doc.category);
+                                                                                }
+                                                                            }}
+                                                                            className="h-6 text-xs"
+                                                                            placeholder="Add category"
+                                                                            autoFocus
+                                                                        />
+                                                                    )
+                                                                ) : (
+                                                                    <div
+                                                                        className="cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1"
+                                                                        onClick={() => setEditingCategoryDocId(doc.id)}
+                                                                    >
+                                                                        {doc.category ? (
+                                                                            <Badge variant="secondary" className="text-xs py-0">
+                                                                                {doc.category}
+                                                                            </Badge>
+                                                                        ) : (
+                                                                            <span className="text-gray-400 text-xs hover:text-gray-600">Add category</span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </td>
                                                             <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
                                                                 {editingDocumentId === doc.id ? (
@@ -1437,10 +1672,16 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                                                 </div>
                                                             </td>
                                                         </tr>
-                                                    ))
-                                                )}
-                                            </tbody>
-                                        </table>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        )}
+                                                        {categoryIndex < uniqueCategories.length - 1 && <Separator className="mt-3" />}
+                                                    </div>
+                                                );
+                                            });
+                                        })()}
                                     </div>
                                 )}
                             </CardContent>
@@ -1706,12 +1947,43 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                         </p>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
-                        <div>
+                        <div className="w-full overflow-hidden">
                             <Label className="text-sm">File Selected</Label>
-                            <div className="flex items-center gap-2 mt-1">
-                                {uploadFile && getFileIcon(uploadFile.name)}
-                                <span className="text-sm truncate">{uploadFile?.name}</span>
+                            <div className="flex items-start gap-2 mt-1 w-full">
+                                <div className="flex-shrink-0 mt-0.5">
+                                    {uploadFile && getFileIcon(uploadFile.name)}
+                                </div>
+                                <div className="text-sm break-all flex-1 min-w-0">{uploadFile?.name}</div>
                             </div>
+                        </div>
+                        <div>
+                            <Label htmlFor="category-select" className="text-sm">Category (Optional)</Label>
+                            {documentCategories.length > 0 ? (
+                                <Select
+                                    value={uploadCategory || "none"}
+                                    onValueChange={(value) => setUploadCategory(value === "none" ? "" : value)}
+                                >
+                                    <SelectTrigger id="category-select" className="mt-1">
+                                        <SelectValue placeholder="Select a category..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">None</SelectItem>
+                                        {documentCategories.map((cat: string) => (
+                                            <SelectItem key={cat} value={cat}>
+                                                {cat}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <Input
+                                    id="category-input"
+                                    value={uploadCategory}
+                                    onChange={(e) => setUploadCategory(e.target.value)}
+                                    placeholder="e.g., Technical, Financial, Legal"
+                                    className="mt-1"
+                                />
+                            )}
                         </div>
                         <div>
                             <Label htmlFor="requirement-select" className="text-sm">Assign to Requirement (Optional)</Label>
@@ -1755,6 +2027,7 @@ export default function ProjectForm({ project, firms = [], users = [] }: Props) 
                                 setShowUploadDialog(false);
                                 setUploadFile(null);
                                 setUploadRequirementId('');
+                                setUploadCategory('');
                                 if (fileInputRef.current) {
                                     fileInputRef.current.value = '';
                                 }
